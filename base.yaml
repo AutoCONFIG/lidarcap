@@ -58,7 +58,7 @@ LOSS:
   bone_loss: False
 
 TrainDataset:
-  dataset_path: 'datasets_path'
+  dataset_path: '/media/yun/nvme1n1p1/datasets-lidarcap/lidarhuman26M'
   use_aug: False
   use_rot: False
   concat_info: False
@@ -87,7 +87,7 @@ TrainDataset:
     - lidarcap_train
   
 TestDataset:
-  dataset_path: "datasets_path"
+  dataset_path: "/media/yun/nvme1n1p1/datasets-lidarcap/lidarhuman26M"
   use_aug: False
   concat_info: False
   use_rot: False

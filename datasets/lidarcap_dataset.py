@@ -151,7 +151,7 @@ class TemporalDataset(Dataset):
                 l = self.cfg.drop_first_n + index * seqlen
                 r = l + seqlen
                 assert r <= len(data['pose']), 'access_hdf5：unknow fault！'
-
+    
                 pose = data['pose'][l:r]
                 betas = data['shape'][l:r]
                 trans = data['trans'][l:r]
@@ -170,36 +170,43 @@ class TemporalDataset(Dataset):
                         lidar_to_mocap_RT = None
                 else:
                     lidar_to_mocap_RT = None
-
-                # body_label = data['body_label'][l:r] if 'body_label' in data else None
+    
                 if 'body_label' in data:
                     body_label = data['body_label'][l:r]
                 else:
                     body_fake = np.ones(data['point_clouds'].shape[:2])
                     body_label = body_fake[l:r]
-
+    
                 back_pc = data['background_m'][l:r] if 'background_m' in data else None
-
-                twice_noice = data['whole_noise'][
-                              l:r] if 'whole_noise' in data else None
-
-                plane_model = data['plane_model'][
-                              l:r] if 'plane_model' in data else None
-
-                assert pose.shape == (seqlen, 72) and full_joints.shape == (
-                seqlen, 24, 3) and human_points.shape == (seqlen, 512, 3), 'shape is wrong！'
-
+    
+                twice_noice = data['whole_noise'][l:r] if 'whole_noise' in data else None
+    
+                plane_model = data['plane_model'][l:r] if 'plane_model' in data else None
+    
+                # # 打印关键变量形状，方便调试
+                # print(f"[{raw_index}] [DEBUG access_hdf5] shapes:")
+                # print(f"  pose: {pose.shape}")
+                # print(f"  full_joints: {full_joints.shape}")
+                # print(f"  human_points: {human_points.shape}")
+                if back_pc is not None:
+                    print(f"  back_pc: {back_pc.shape}")
+                if plane_model is not None:
+                    print(f"  plane_model: {plane_model.shape}")
+                if twice_noice is not None:
+                    print(f"  twice_noice: {twice_noice.shape}")
+    
+                assert pose.shape == (seqlen, 72) and full_joints.shape == (seqlen, 24, 3) and human_points.shape == (seqlen, 512, 3), \
+                    f"shape is wrong! pose: {pose.shape}, full_joints: {full_joints.shape}, human_points: {human_points.shape}"
+    
                 sample_pc = data['sample_pc'][l:r] if 'sample_pc' in data else None
-
-                boundary_label = data['boundary_label'][
-                                 l:r] if 'boundary_label' in data else None
-
-                project_image = data['project_image'][
-                                l:r] if 'project_image' in data else None
-
+    
+                boundary_label = data['boundary_label'][l:r] if 'boundary_label' in data else None
+    
+                project_image = data['project_image'][l:r] if 'project_image' in data else None
+    
                 return pose, betas, trans, human_points, points_num, full_joints, \
-                       rotmats, lidar_to_mocap_RT, body_label, sample_pc, boundary_label \
-                    , project_image, back_pc, plane_model, twice_noice
+                       rotmats, lidar_to_mocap_RT, body_label, sample_pc, boundary_label, \
+                       project_image, back_pc, plane_model, twice_noice
         assert False, f'cant find the dataset whose index：{raw_index}'
 
     def access_hdf5_dataset(self, dataset_id, dataset_key):
@@ -380,59 +387,45 @@ class TemporalDataset(Dataset):
         item['betas'] = torch.from_numpy(betas).float()
         item['trans'] = torch.from_numpy(trans).float()
 
-        if self.cfg.use_boundary:
+        if self.cfg.use_boundary and boundary_label is not None:
             if len(boundary_label.shape) == 3:
                 human_boundary_points = points * boundary_label
                 item['human_points'] = torch.from_numpy(human_boundary_points).float()
             elif len(boundary_label.shape) == 2:
                 human_boundary_points = points * boundary_label[..., np.newaxis]
                 item['human_points'] = torch.from_numpy(human_boundary_points).float()
+        if boundary_label is not None:
+            if len(boundary_label.shape) == 3:
+                human_boundary_points = points * boundary_label
+                item['human_boundary'] = torch.from_numpy(human_boundary_points).float()
+            elif len(boundary_label.shape) == 2:
+                human_boundary_points = points * boundary_label[..., np.newaxis]
+                item['human_boundary'] = torch.from_numpy(human_boundary_points).float()
 
-        if len(boundary_label.shape) == 3:
-            human_boundary_points = points * boundary_label
-            item['human_boundary'] = torch.from_numpy(human_boundary_points).float()
-        elif len(boundary_label.shape) == 2:
-            human_boundary_points = points * boundary_label[..., np.newaxis]
-            item['human_boundary'] = torch.from_numpy(human_boundary_points).float()
-
-        if self.cfg.inside_random:
+        if self.cfg.inside_random and boundary_label is not None:  # MODIFIED
             if len(boundary_label.shape) == 3:
                 boundary_label_ = boundary_label.astype(bool).squeeze()
             elif len(boundary_label.shape) == 2:
                 boundary_label_ = boundary_label.astype(bool)
-            final_random = np.zeros((0, points.shape[1], points.shape[2]))
-            for index in range(points.shape[0]):
-                # 512 * 3
-                boundary_points = points[index][boundary_label_[index]]
-                boundary_x, boundary_y, boundary_z, = boundary_points[:, 0], \
-                                                      boundary_points[:, 1], \
-                                                      boundary_points[:, 2]
-                inside_points = points[index][~boundary_label_[index]]
-                random_noise = np.zeros_like(inside_points)
-                for k in range(inside_points.shape[0]):
-                    # 1 * 3
-                    point = inside_points[k]
-                    P_x, P_y, P_z = point[0], point[1], point[2]
-                    P_y = self.add_dis_xy(P_x, P_y, boundary_x, boundary_y)
-                    # P_x = self.add_dis_xy(P_y, P_x, boundary_y, boundary_x)
-                    P_z = self.add_dis_z(P_x, P_y, P_z, boundary_x, boundary_y,
-                                         boundary_z)
-                    random_noise[k] = np.array([P_x, P_y, P_z])
-                random = np.concatenate((random_noise, boundary_points))
-                np.random.shuffle(random)
-
-                #     random_noise_1 = np.random.rand(inside_points.shape[0],inside_points.shape[1]) * 0.15
-                #     random_noise_2 = np.random.rand(inside_points.shape[0],inside_points.shape[1]) * 0.15
-                #     random_noise = random_noise_2 - random_noise_1
-                #     random_noise[:,-1:] = random_noise[:,-1:]*2
-                #     random_inside = inside_points + random_noise
-                #     try:
-                #         bool_ = in_convex_polyhedron(boundary_points, random_inside)
-                #         final_inside = inside_points * ~bool_ + random_inside * bool_
-                #         random = np.concatenate((final_inside, boundary_points))
-                #     except:
-                #         random = points[index]
-                final_random = np.concatenate((final_random, random[np.newaxis, ...]))
+            else:
+                boundary_label_ = None  # MODIFIED 防止boundary_label不符合预期时报错
+        
+            if boundary_label_ is not None:  # MODIFIED
+                final_random = np.zeros((0, points.shape[1], points.shape[2]))
+                for index in range(points.shape[0]):
+                    boundary_points = points[index][boundary_label_[index]]
+                    boundary_x, boundary_y, boundary_z = boundary_points[:, 0], boundary_points[:, 1], boundary_points[:, 2]
+                    inside_points = points[index][~boundary_label_[index]]
+                    random_noise = np.zeros_like(inside_points)
+                    for k in range(inside_points.shape[0]):
+                        point = inside_points[k]
+                        P_x, P_y, P_z = point[0], point[1], point[2]
+                        P_y = self.add_dis_xy(P_x, P_y, boundary_x, boundary_y)
+                        P_z = self.add_dis_z(P_x, P_y, P_z, boundary_x, boundary_y, boundary_z)
+                        random_noise[k] = np.array([P_x, P_y, P_z])
+                    random = np.concatenate((random_noise, boundary_points))
+                    np.random.shuffle(random)
+                    final_random = np.concatenate((final_random, random[np.newaxis, ...]))
 
             item['human_points'] = torch.from_numpy(final_random).float()
 

@@ -7,7 +7,7 @@ import os
 
 ROOT_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
-DATASET_DIR = "dataset_path"
+DATASET_DIR = "/media/yun/nvme1n1p1/datasets-lidarcap/lidarhuman26M"
 SMPL_FILE = os.path.join(DATA_DIR, 'basicModel_neutral_lbs_10_207_0_v1.0.0.pkl')
 # seems all zeros.
 JOINT_REGRESSOR_TRAIN_EXTRA = os.path.join(DATA_DIR, 'J_regressor_extra.npy')

@@ -289,6 +289,12 @@ def output_metric(pred_poses, gt_poses):
     pred_joints = util.poses_to_joints(pred_poses)
     gt_joints = util.poses_to_joints(gt_poses)
 
+    min_len = min(len(pred_joints), len(gt_joints))
+    pred_vertices = pred_vertices[:min_len]
+    gt_vertices = gt_vertices[:min_len]
+    pred_joints = pred_joints[:min_len]
+    gt_joints = gt_joints[:min_len]
+
     m2mm = 1000
 
     pred_joints -= pred_joints[:, :1, :]
