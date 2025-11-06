@@ -250,7 +250,7 @@ def rot6d_to_rotmat(x):
     # denom = inp.pow(2).sum(dim=1).sqrt().unsqueeze(-1) + 1e-8
     # b2 = inp / denom
 
-    b3 = torch.cross(b1, b2)
+    b3 = torch.cross(b1, b2, dim=-1)
     return torch.stack((b1, b2, b3), dim=-1)
 
 

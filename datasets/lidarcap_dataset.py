@@ -3,6 +3,8 @@ import torch
 import h5py
 from torch.utils.data import Dataset
 import os, random, cv2
+import collections.abc
+import copy
 
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
@@ -151,7 +153,7 @@ class TemporalDataset(Dataset):
                 l = self.cfg.drop_first_n + index * seqlen
                 r = l + seqlen
                 assert r <= len(data['pose']), 'access_hdf5：unknow fault！'
-    
+
                 pose = data['pose'][l:r]
                 betas = data['shape'][l:r]
                 trans = data['trans'][l:r]
@@ -170,19 +172,19 @@ class TemporalDataset(Dataset):
                         lidar_to_mocap_RT = None
                 else:
                     lidar_to_mocap_RT = None
-    
+
                 if 'body_label' in data:
                     body_label = data['body_label'][l:r]
                 else:
                     body_fake = np.ones(data['point_clouds'].shape[:2])
                     body_label = body_fake[l:r]
-    
+
                 back_pc = data['background_m'][l:r] if 'background_m' in data else None
-    
+
                 twice_noice = data['whole_noise'][l:r] if 'whole_noise' in data else None
-    
+
                 plane_model = data['plane_model'][l:r] if 'plane_model' in data else None
-    
+
                 # # 打印关键变量形状，方便调试
                 # print(f"[{raw_index}] [DEBUG access_hdf5] shapes:")
                 # print(f"  pose: {pose.shape}")
@@ -194,16 +196,16 @@ class TemporalDataset(Dataset):
                     print(f"  plane_model: {plane_model.shape}")
                 if twice_noice is not None:
                     print(f"  twice_noice: {twice_noice.shape}")
-    
+
                 assert pose.shape == (seqlen, 72) and full_joints.shape == (seqlen, 24, 3) and human_points.shape == (seqlen, 512, 3), \
                     f"shape is wrong! pose: {pose.shape}, full_joints: {full_joints.shape}, human_points: {human_points.shape}"
-    
+
                 sample_pc = data['sample_pc'][l:r] if 'sample_pc' in data else None
-    
+
                 boundary_label = data['boundary_label'][l:r] if 'boundary_label' in data else None
-    
+
                 project_image = data['project_image'][l:r] if 'project_image' in data else None
-    
+
                 return pose, betas, trans, human_points, points_num, full_joints, \
                        rotmats, lidar_to_mocap_RT, body_label, sample_pc, boundary_label, \
                        project_image, back_pc, plane_model, twice_noice
@@ -394,6 +396,7 @@ class TemporalDataset(Dataset):
             elif len(boundary_label.shape) == 2:
                 human_boundary_points = points * boundary_label[..., np.newaxis]
                 item['human_points'] = torch.from_numpy(human_boundary_points).float()
+
         if boundary_label is not None:
             if len(boundary_label.shape) == 3:
                 human_boundary_points = points * boundary_label
@@ -409,7 +412,7 @@ class TemporalDataset(Dataset):
                 boundary_label_ = boundary_label.astype(bool)
             else:
                 boundary_label_ = None  # MODIFIED 防止boundary_label不符合预期时报错
-        
+    
             if boundary_label_ is not None:  # MODIFIED
                 final_random = np.zeros((0, points.shape[1], points.shape[2]))
                 for index in range(points.shape[0]):
@@ -479,20 +482,15 @@ def fix_dataset_seqlen(dataset_id):
 
 def collate(batch, _use_shared_memory=True):
     """Puts each data field into a tensor with outer dimension batch size.
-    Copied from https://github.com/pytorch in torch/utils/data/_utils/collate.py
+    Updated to match modern PyTorch collate behavior.
     """
     import re
+
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
+
     if isinstance(batch[0], torch.Tensor):
-        out = None
-        if _use_shared_memory:
-            # If we're in a background process, concatenate directly into a
-            # shared memory tensor to avoid an extra copy
-            numel = sum([x.numel() for x in batch])
-            storage = batch[0].storage()._new_shared(numel)
-            out = batch[0].new(storage)
-        return torch.stack(batch, 0, out=out)
+        return torch.stack(batch, 0)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
         elem = batch[0]
@@ -513,10 +511,48 @@ def collate(batch, _use_shared_memory=True):
         return torch.DoubleTensor(batch)
     elif isinstance(batch[0], str):
         return batch
-    elif isinstance(batch[0], dict):
-        return {key: collate([d[key] for d in batch]) for key in batch[0]}
-    elif isinstance(batch[0], (tuple, list)):
-        transposed = zip(*batch)
-        return [collate(samples) for samples in transposed]
+    elif isinstance(batch[0], collections.abc.Mapping):
+        try:
+            if isinstance(batch[0], collections.abc.MutableMapping):
+                # The mapping type may have extra properties, so we can't just
+                # use `type(data)(...)` to create the new mapping.
+                # Create a clone and update it if the mapping type is mutable.
+                clone = copy.copy(batch[0])
+                clone.update({key: collate([d[key] for d in batch]) for key in batch[0]})
+                return clone
+            else:
+                return elem_type({key: collate([d[key] for d in batch]) for key in batch[0]})
+        except TypeError:
+            # The mapping type may not support `copy()` / `update(mapping)`
+            # or `__init__(iterable)`.
+            return {key: collate([d[key] for d in batch]) for key in batch[0]}
+    elif isinstance(batch[0], tuple) and hasattr(batch[0], "_fields"):  # namedtuple
+        return elem_type(*(collate(samples) for samples in zip(*batch)))
+    elif isinstance(batch[0], collections.abc.Sequence):
+        # check to make sure that the elements in batch have consistent size
+        it = iter(batch)
+        elem_size = len(next(it))
+        if not all(len(elem) == elem_size for elem in it):
+            raise RuntimeError("each element in list of batch should be of equal size")
+        transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
 
-    raise TypeError((error_msg.format(type(batch[0]))))
+        if isinstance(batch[0], tuple):
+            return [collate(samples) for samples in transposed]  # Backwards compatibility.
+        else:
+            try:
+                if isinstance(batch[0], collections.abc.MutableSequence):
+                    # The sequence type may have extra properties, so we can't just
+                    # use `type(data)(...)` to create the new sequence.
+                    # Create a clone and update it if the sequence type is mutable.
+                    clone = copy.copy(batch[0])
+                    for i, samples in enumerate(transposed):
+                        clone[i] = collate(samples)
+                    return clone
+                else:
+                    return elem_type([collate(samples) for samples in transposed])
+            except TypeError:
+                # The sequence type may not support `copy()` / `__setitem__(index, item)`
+                # or `__init__(iterable)` (e.g., `range`).
+                return [collate(samples) for samples in transposed]
+
+    raise TypeError(error_msg.format(type(batch[0])))

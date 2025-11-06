@@ -1,7 +1,6 @@
 from tqdm import tqdm
 from collections import defaultdict
 
-import wandb
 import os
 import numpy as np
 import torch
@@ -48,14 +47,13 @@ class Crafter(nn.Module):
         raise NotImplementedError()
 
 
-
-
 class Trainer(Crafter):
-    def __init__(self, net, loader, loss, optimizer):
+    def __init__(self, net, loader, loss, optimizer, log_interval):
         Crafter.__init__(self, net)
         self.loader = loader
         self.loss_func = loss
         self.optimizer = optimizer
+        self.log_interval = log_interval
 
     def __call__(self, epoch, train=True, test=False, visual=False):
 
@@ -72,7 +70,6 @@ class Trainer(Crafter):
         stats = defaultdict(list)
 
         loader = self.loader[key]
-        # loader.dataset.epoch += 1
 
         bar = tqdm(loader, bar_format="{l_bar}{bar:3}{r_bar}", ncols=110)
 
@@ -100,7 +97,6 @@ class Trainer(Crafter):
                     for index in range(pred_vertices.shape[0]):
                         vertices.append(
                             pred_vertices[index].squeeze().cpu().detach().numpy())
-                #del inputs, details
 
             rotmats = np.concatenate(rotmats, axis=0)
             final_loss = {k: mean(v) for k, v in stats.items()}
@@ -136,21 +132,6 @@ class Trainer(Crafter):
 
             if not train and (iter + 1) == len(loader):
                 bar.set_postfix(loss=f'{mean(stats["loss"]):06.06f}')
-
-            first_step = epoch == 1 and iter == 0 and train
-            log_step = (
-                iter + 1) % wandb.config.log_interval == 0 and iter != 0 and train
-            if first_step or log_step:
-                # Use trained image numbers as step
-                step = (epoch - 1) * len(loader.dataset) \
-                    + (iter + 1) * loader.batch_size
-                logs = {k: mean(v) for k, v in stats.items()}
-                logs['lr'] = self.optimizer.param_groups[0]['lr']
-                logs['global_step'] = step
-                wandb.log(logs)
-                # del logs
-            # del inputs, details
-
 
         final_loss = {k: mean(v) for k, v in stats.items()}
 

@@ -20,7 +20,7 @@ def compute_accel(joints):
 def compute_error_accel(joints_gt, joints_pred, vis=None):
     """
     Computes acceleration error:
-        1/(n-2) \sum_{i=1}^{n-1} X_{i-1} - 2X_i + X_{i+1}
+        1/(n-2) \\sum_{i=1}^{n-1} X_{i-1} - 2X_i + X_{i+1}
     Note that for each frame that is not visible, three entries in the
     acceleration error should be zero'd out.
     Args:

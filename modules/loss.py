@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from modules.smpl import SMPL
 from modules.geometry import axis_angle_to_rotation_matrix
-from extensions.chamfer_dist import ChamferDistanceL1
+from libs.chamfer_dist import ChamferDistanceL1
 from pointnet2_ops import pointnet2_utils
 
 
