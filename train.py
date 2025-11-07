@@ -8,6 +8,7 @@ import logging
 import signal
 import json
 import glob
+import datetime
 
 from config import DATASET_DIR
 from datasets.lidarcap_dataset import collate, TemporalDataset
@@ -258,8 +259,7 @@ if __name__ == '__main__':
         print(f"Resuming training from {run_dir}")
     else:
         # Create new run
-        import time
-        run_id = f"run_{int(time.time())}"
+        run_id = f"run_{datetime.datetime.now().strftime('%Y%m%d%H%M')}"
         run_dir = os.path.join(args.output_dir, run_id)
         print(f"Starting new training run: {run_id}")
     
@@ -326,9 +326,18 @@ if __name__ == '__main__':
     if args.resume:
         checkpoint = training_manager.load_progress()
         if checkpoint:
+            # Load model state
             net.load_state_dict(checkpoint['model_state_dict'])
+            
+            # Move model to GPU first if using CUDA
+            train = MyTrainer(net, loader, loss, optimizer, args.log_interval)
+            if iscuda:
+                train = train.cuda()
+            
+            # Load optimizer and scheduler state after moving model to GPU
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            
             start_epoch = checkpoint['epoch'] + 1
             mintloss = checkpoint['mintloss']
             minvloss = checkpoint['minvloss']
@@ -340,6 +349,11 @@ if __name__ == '__main__':
                 logger.info("Training history:")
                 for result in history[-5:]:  # Show last 5 epochs
                     logger.info(f"  Epoch {result['epoch']}: Train={result['train_loss']:.6f}, Val={result['val_loss']:.6f}")
+        else:
+            # Instance trainer normally if no checkpoint
+            train = MyTrainer(net, loader, loss, optimizer, args.log_interval)
+            if iscuda:
+                train = train.cuda()
                     
     elif args.ckpt_path is not None:
         logger.info(f"Loading checkpoint from {args.ckpt_path}")
@@ -349,11 +363,16 @@ if __name__ == '__main__':
                       if k in model_dict.keys()}
         model_dict.update(state_dict)
         net.load_state_dict(model_dict)
-    
-    # Instance trainer
-    train = MyTrainer(net, loader, loss, optimizer, args.log_interval)
-    if iscuda:
-        train = train.cuda()
+        
+        # Instance trainer
+        train = MyTrainer(net, loader, loss, optimizer, args.log_interval)
+        if iscuda:
+            train = train.cuda()
+    else:
+        # Instance trainer
+        train = MyTrainer(net, loader, loss, optimizer, args.log_interval)
+        if iscuda:
+            train = train.cuda()
 
     if args.eval:
         logger.info("=== EVALUATION MODE ===")
