@@ -71,7 +71,7 @@ class Trainer(Crafter):
 
         loader = self.loader[key]
 
-        bar = tqdm(loader, bar_format="{l_bar}{bar:3}{r_bar}", ncols=110)
+        bar = tqdm(loader, bar_format="{l_bar}{bar:3}{r_bar}", ncols=236)
 
         if test:
             rotmats = []
