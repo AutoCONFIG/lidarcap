@@ -1,2 +1,0 @@
-pointgroup_ops
-pointgroup_ops_cuda
