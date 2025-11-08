@@ -7,7 +7,7 @@ python train.py \
     --gpu 0 \
     --dataset lidarcap \
     --bs 2 \
-    --eval_bs 3 \
-    --epochs 236 \
+    --eval_bs 2 \
+    --epochs 123 \
     --lr 0.0001 \
-    # --resume best-valid-loss.pth
+    --resume output/run_202511071055
