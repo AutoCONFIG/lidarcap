@@ -1,6 +1,7 @@
 git+https://github.com/octree-nn/ocnn-pytorch.git
 git+https://github.com/openai/CLIP.git
-git+https://github.com/Dao-AILab/flash-attention.git
+#git+https://github.com/Dao-AILab/flash-attention.git
+https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
 git+https://github.com/mattloper/chumpy.git
 ./libs/pointops
 ./libs/pointgroup_ops

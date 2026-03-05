@@ -1098,54 +1098,6 @@ class CUDADetector:
             print(f"失败: {e}")
             print("⚠️ 框架间可能存在冲突")
 
-    def export_report(self, filename="gpu_detection_report.txt"):
-        """导出检测报告"""
-        print_header("导出检测报告")
-
-        try:
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write("GPU环境检测报告\n")
-                f.write("=" * 50 + "\n\n")
-
-                # 系统信息
-                f.write("系统信息:\n")
-                f.write(f"  操作系统: {platform.system()} {platform.release()}\n")
-                f.write(f"  Python版本: {sys.version.split()[0]}\n")
-                f.write(f"  Python路径: {sys.executable}\n\n")
-
-                # 驱动信息
-                if self.driver_info:
-                    f.write("NVIDIA驱动信息:\n")
-                    f.write(f"  驱动版本: {self.driver_info.get('version', 'N/A')}\n")
-                    f.write(f"  支持CUDA版本: {self.driver_info.get('max_cuda', 'N/A')}\n\n")
-
-                # GPU信息
-                if self.gpu_info:
-                    f.write("GPU信息:\n")
-                    for gpu_id, gpu_data in self.gpu_info.items():
-                        f.write(f"  {gpu_id}: {gpu_data.get('name', 'Unknown')}\n")
-                        f.write(f"    显存: {gpu_data.get('memory_total', 0)/1024:.1f}GB\n")
-
-                # PyTorch信息
-                if self.pytorch_info.get('installed'):
-                    f.write("PyTorch信息:\n")
-                    f.write(f"  版本: {self.pytorch_info.get('version', 'N/A')}\n")
-                    f.write(f"  CUDA支持: {self.pytorch_info.get('cuda_available', False)}\n")
-                    f.write(f"  CUDA版本: {self.pytorch_info.get('cuda_compiled', 'N/A')}\n\n")
-
-                # TensorFlow信息
-                if self.tensorflow_info.get('installed'):
-                    f.write("TensorFlow信息:\n")
-                    f.write(f"  版本: {self.tensorflow_info.get('version', 'N/A')}\n")
-                    f.write(f"  GPU支持: {self.tensorflow_info.get('gpu_available', False)}\n")
-                    f.write(f"  CUDA版本: {self.tensorflow_info.get('cuda_compiled', 'N/A')}\n")
-                    f.write(f"  cuDNN版本: {self.tensorflow_info.get('cudnn_compiled', 'N/A')}\n")
-
-            print(f"✅ 报告已导出到: {filename}")
-
-        except Exception as e:
-            print(f"❌ 导出报告失败: {e}")
-
     def run_full_detection(self):
         """运行完整检测流程"""
         print("=" * 60)
@@ -1169,9 +1121,6 @@ class CUDADetector:
 
         # 生成建议
         self.generate_recommendations()
-
-        # 导出报告
-        self.export_report()
 
         print_header("检测完成")
         print("如需更详细的帮助，请提供具体的错误信息或需求")

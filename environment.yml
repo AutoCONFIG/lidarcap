@@ -1,6 +1,6 @@
 name: lidarcap
 channels:
-  - nvidia/label/cuda-12.9.1
+  - nvidia/label/cuda-12.8.1
   - nvidia
   - bioconda
   - conda-forge
@@ -11,7 +11,7 @@ dependencies:
   - cuda-toolkit
   - python=3.12
   - pip:
-    - cuda-toolkit[all]==12.9.1
+    - cuda-toolkit[all]==12.8.1
     - h5py
     - joblib
     - matplotlib
@@ -27,7 +27,7 @@ dependencies:
     - scipy
     - seaborn
     - tensorflow
-    - torch
+    - torch==2.9.1
     - torchaudio
     - torchvision
     - tqdm
