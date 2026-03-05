@@ -48,7 +48,7 @@ def get_sorted_filenames_by_index(dirname, isabs=True):
     if not os.path.exists(dirname):
         return []
     filenames = os.listdir(dirname)
-    filenames = sorted(os.listdir(dirname), key=lambda x: get_index(x))
+    filenames = sorted(filenames, key=lambda x: get_index(x))
     if isabs:
         filenames = [os.path.join(dirname, filename) for filename in filenames]
     return filenames
@@ -130,7 +130,8 @@ def foo(id, args):
         # cur_vertices.append(cur_vertices[-1])
         cur_point_clouds.append(cur_point_clouds[-1])
         cur_points_nums.append(cur_points_nums[-1])
-        cur_depths.append(cur_depths[-1])
+        if cur_depths:  # 检查列表不为空
+            cur_depths.append(cur_depths[-1])
         n += 1
     times = n // args.seqlen
     for i in range(times):
@@ -159,10 +160,10 @@ def test(args):
 
 
 def get_sorted_ids(s):
-    if re.match('^([1-9]\d*)-([1-9]\d*)$', s):
+    if re.match(r'^([1-9]\d*)-([1-9]\d*)$', s):
         start_index, end_index = s.split('-')
         indexes = list(range(int(start_index), int(end_index) + 1))
-    elif re.match('^(([1-9]\d*),)*([1-9]\d*)$', s):
+    elif re.match(r'^(([1-9]\d*),)*([1-9]\d*)$', s):
         indexes = [int(x) for x in s.split(',')]
     return sorted(indexes)
 

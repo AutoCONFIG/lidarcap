@@ -12,6 +12,18 @@ import torch
 import torch.nn as nn
 import os
 import sys
+import warnings
+
+# 使用pickle context manager抑制NumPy的dtype警告
+class PickleWarningsContext:
+    def __enter__(self):
+        warnings.filterwarnings('ignore', message=".*dtype.*align.*")
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        warnings.filterwarnings('default', message=".*dtype.*align.*")
+        return False
+
 sys.path.append(os.path.dirname(__file__))
 import geometry
 # from opendr.camera import ProjectPoints
@@ -25,7 +37,8 @@ class SMPL(nn.Module):
     def __init__(self, model_file=cfg.SMPL_FILE):
         super(SMPL, self).__init__()
         with open(model_file, 'rb') as f:
-            smpl_model = pickle.load(f, encoding='iso-8859-1')
+            with PickleWarningsContext():
+                smpl_model = pickle.load(f, encoding='iso-8859-1')
         J_regressor = smpl_model['J_regressor'].tocoo()
         row = J_regressor.row
         col = J_regressor.col

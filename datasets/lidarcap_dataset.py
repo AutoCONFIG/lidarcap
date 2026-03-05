@@ -556,3 +556,387 @@ def collate(batch, _use_shared_memory=True):
                 return [collate(samples) for samples in transposed]
 
     raise TypeError(error_msg.format(type(batch[0])))
+
+
+class CachedLidarCapDataset(Dataset):
+    """
+    针对合并后大HDF5文件优化的LidarCap数据集类
+
+    特性:
+    - 支持单个大HDF5文件，避免频繁打开多个小文件
+    - 支持预加载到内存（如果内存足够）
+    - 与TemporalDataset接口兼容
+    """
+
+    default_cfg = {
+        'dataset_path': 'your_hdf5_dataset_path',
+        'use_aug': False,
+        'use_rot': False,
+        'use_straight': False,
+        'use_pc_w_raw_z': False,
+        'ret_raw_pc': False,
+        'seqlen': 16,
+        'drop_first_n': 0,
+        'add_noice_pc': False,
+        'noice_pc_scale': 1.5,
+        'set_body_label_all_one': False,
+        'noice_pc_rate': 1.0,
+        'replace_noice_pc': False,
+        'replace_noice_pc_rate': 0.2,
+        'random_permutation': False,
+        'use_trans_to_normalize': False,
+        'replace_pc_strategy': 'random',
+        'noise_distribution': 'uniform',
+        'preload': False,  # 是否预加载到内存
+    }
+
+    def __init__(self, cfg=None, **kwargs):
+        super().__init__()
+        if cfg is not None:
+            assert not hasattr(self, 'cfg'), 'cfg for initialization！'
+            self.cfg = cfg
+            self.cfg.update({k: v for k, v in CachedLidarCapDataset.default_cfg.items() if
+                             k not in self.cfg})
+        else:
+            cfg = CachedLidarCapDataset.default_cfg.copy()
+            cfg.update(kwargs)
+            self.cfg = CfgNode(cfg)
+
+        self.update_cfg()
+
+    def update_cfg(self, **kwargs):
+        assert all([k in self.cfg for k in kwargs.keys()])
+        self.cfg.update(kwargs)
+
+        self.dataset_path = self.cfg.dataset_path
+
+        # 打开HDF5文件
+        self.h5file = h5py.File(self.dataset_path, 'r')
+
+        # 加载索引信息
+        if 'dataset_ids' in self.h5file:
+            # 合并后的HDF5文件格式
+            self.is_merged = True
+            self.dataset_ids = self.h5file['dataset_ids'][:]
+            self.dataset_offsets = self.h5file['dataset_offsets'][:]
+            self.dataset_lengths = self.h5file['dataset_lengths'][:]
+        else:
+            # 传统格式，将整个文件视为一个数据集
+            self.is_merged = False
+            self.dataset_ids = [0]
+            self.dataset_offsets = [0]
+            self.dataset_lengths = [len(self.h5file['pose'])]
+
+        # 计算总长度
+        self.length = sum(
+            (length - self.cfg.drop_first_n) // self.cfg.seqlen
+            for length in self.dataset_lengths
+        )
+
+        self.lidar_to_mocap_RT_flag = 'lidar_to_mocap_RT' in self.h5file
+
+        # 如果需要，预加载到内存
+        self.cache = {}
+        if self.cfg.preload:
+            print("[CachedLidarCapDataset] 正在预加载数据到内存...")
+            for key in tqdm(self.h5file.keys(), desc="预加载"):
+                if key not in ['dataset_ids', 'dataset_offsets', 'dataset_lengths']:
+                    self.cache[key] = self.h5file[key][:]
+            print("[CachedLidarCapDataset] 预加载完成")
+
+        if self.cfg.use_rot or self.cfg.use_straight:
+            from util.smpl import SMPL
+            self.smpl = SMPL()
+        else:
+            self.lidar_to_mocap_RT_flag = False
+
+    def __del__(self):
+        if hasattr(self, 'h5file') and self.h5file:
+            self.h5file.close()
+            print('[CachedLidarCapDataset] HDF5文件已关闭')
+
+    def _get_data(self, key, start, end):
+        """从缓存或文件读取数据"""
+        if key in self.cache:
+            return self.cache[key][start:end]
+        else:
+            return self.h5file[key][start:end]
+
+    def access_hdf5(self, index):
+        """访问HDF5数据，返回序列数据"""
+        seqlen = self.cfg.seqlen
+        raw_index = int(index)
+
+        # 查找对应的数据集
+        for i, (offset, length) in enumerate(zip(self.dataset_offsets, self.dataset_lengths)):
+            dataset_max_index = (length - self.cfg.drop_first_n) // seqlen - 1
+
+            if index > dataset_max_index:
+                index -= dataset_max_index + 1
+            else:
+                l = offset + self.cfg.drop_first_n + index * seqlen
+                r = l + seqlen
+
+                pose = self._get_data('pose', l, r)
+                betas = self._get_data('shape', l, r)
+                trans = self._get_data('trans', l, r)
+
+                if 'masked_point_clouds' in self.h5file:
+                    human_points = self._get_data('masked_point_clouds', l, r)
+                else:
+                    human_points = self._get_data('point_clouds', l, r)
+
+                points_num = self._get_data('points_num', l, r)
+                full_joints = self._get_data('full_joints', l, r)
+
+                rotmats = self._get_data('rotmats', l, r) if 'rotmats' in self.h5file else None
+
+                if self.lidar_to_mocap_RT_flag:
+                    lidar_to_mocap_RT = self._get_data('lidar_to_mocap_RT', l, r)
+                else:
+                    lidar_to_mocap_RT = None
+
+                if 'body_label' in self.h5file:
+                    body_label = self._get_data('body_label', l, r)
+                else:
+                    body_fake = np.ones(self._get_data('point_clouds', offset, offset + length).shape[:2])
+                    body_label = body_fake[self.cfg.drop_first_n + index * seqlen:
+                                          self.cfg.drop_first_n + index * seqlen + seqlen]
+
+                back_pc = self._get_data('background_m', l, r) if 'background_m' in self.h5file else None
+                twice_noice = self._get_data('whole_noise', l, r) if 'whole_noise' in self.h5file else None
+                plane_model = self._get_data('plane_model', l, r) if 'plane_model' in self.h5file else None
+
+                # 检查数据形状
+                assert pose.shape == (seqlen, 72) and full_joints.shape == (seqlen, 24, 3) and human_points.shape == (seqlen, 512, 3), \
+                    f"shape is wrong! pose: {pose.shape}, full_joints: {full_joints.shape}, human_points: {human_points.shape}"
+
+                sample_pc = self._get_data('sample_pc', l, r) if 'sample_pc' in self.h5file else None
+                boundary_label = self._get_data('boundary_label', l, r) if 'boundary_label' in self.h5file else None
+                project_image = self._get_data('project_image', l, r) if 'project_image' in self.h5file else None
+
+                return pose, betas, trans, human_points, points_num, full_joints, \
+                       rotmats, lidar_to_mocap_RT, body_label, sample_pc, boundary_label, \
+                       project_image, back_pc, plane_model, twice_noice
+
+        assert False, f'cant find the dataset whose index：{raw_index}'
+
+    def __getitem__(self, index):
+        """获取数据项"""
+        item = {}
+        item['index'] = index
+
+        try:
+            pose, betas, trans, human_points, points_num, full_joints, rotmats, \
+            lidar_to_mocap_RT, body_label, sample_pc, boundary_label, project_image, \
+            back_pc, plane_model, twice_noise = self.access_hdf5(index)
+        except NotImplementedError as e:
+            print(e)
+            print(f'[ERROR] access_hdf5 error, index is {index}')
+
+        # 以下逻辑与TemporalDataset保持一致
+        if self.cfg.ret_raw_pc:
+            item['point_clouds'] = human_points.copy()
+
+        if self.cfg.use_sample:
+            human_points = sample_pc
+
+        if self.cfg.add_noice_pc:
+            assert body_label is None
+            unique_pc = [np.unique(seg, axis=0) for seg in human_points]
+            noice_pc = []
+            body_label = []
+            for e in unique_pc:
+                numa = int((512 - e.shape[0]) * self.cfg.noice_pc_rate)
+                numb = 512 - numa - e.shape[0]
+                noice_pc.append(np.concatenate(
+                    (e,
+                     e[np.random.choice(np.arange(e.shape[0]), numb)],
+                     (np.random.rand(numa, 3) - 0.5) * self.cfg.noice_pc_scale + e.mean(
+                         axis=0, keepdims=True),
+                     ), axis=0))
+                body_label.append(
+                    np.concatenate((np.ones(512 - numa), np.zeros(numa)), axis=0))
+            human_points = np.stack(noice_pc)
+            body_label = np.stack(body_label)
+
+        if self.cfg.set_body_label_all_one:
+            body_label = np.ones(human_points.shape[:2])
+
+        if self.cfg.use_trans_to_normalize:
+            points = human_points.copy() - trans[:, np.newaxis, :]
+            if back_pc is not None:
+                back_pc = back_pc - trans[:, np.newaxis, :]
+            if twice_noise is not None:
+                twice_noise = twice_noise - trans[:, np.newaxis, :]
+        elif self.cfg.use_pc_w_raw_z:
+            points = pc_normalize_w_raw_z(human_points.copy())
+        else:
+            points = pc_normalize(human_points.copy())
+
+        if self.cfg.replace_noice_pc and self.cfg.replace_noice_pc_rate > 0:
+            if 'random' == self.cfg.replace_pc_strategy:
+                num_of_noise = int(512 * self.cfg.replace_noice_pc_rate)
+                noise_label = np.zeros((16, 512), dtype=bool)
+                noice_choice = np.random.choice(np.arange(512), num_of_noise, replace=False)
+                noise_label[np.arange(16)[:, np.newaxis], noice_choice[np.newaxis, :]] = True
+            elif 'ballquery16' == self.cfg.replace_pc_strategy:
+                ballcenters = points[np.arange(16)[:, np.newaxis], np.random.randint(0, 512, (16, 1))]
+                noise_label = np.linalg.norm(points - ballcenters, axis=-1) < self.cfg.replace_noice_pc_rate
+            elif 'ballquery1' == self.cfg.replace_pc_strategy:
+                ballcenters = points[np.random.randint(0, 16), np.random.randint(0, 512)][np.newaxis, :]
+                noise_label = np.linalg.norm(points - ballcenters, axis=-1) < self.cfg.replace_noice_pc_rate
+            else:
+                raise NotImplementedError()
+
+            if 'uniform' == self.cfg.noise_distribution:
+                noise = (np.random.rand(16, 512, 3) - 0.5) * np.array([0.8, 0.8, 1.2]) + np.array([0, -0.23081176, 0])
+            elif 'normal' == self.cfg.noise_distribution:
+                noise = np.random.randn(16, 512, 3) * self.cfg.replace_noice_pc_rate
+                if 'ballquery' in self.cfg.replace_pc_strategy:
+                    noise += ballcenters
+                else:
+                    noise += np.array([0, -0.23081176, 0])
+            else:
+                raise NotImplementedError()
+
+            if noise_label.sum() > 0:
+                points[noise_label] = noise[noise_label]
+                if body_label is None:
+                    body_label = np.ones(human_points.shape[:2])
+                body_label[noise_label] = 0
+            else:
+                if body_label is None:
+                    body_label = np.ones(human_points.shape[:2])
+
+        if self.cfg.random_permutation:
+            permuatation = np.random.permutation(512)
+            points = points[np.arange(16)[:, np.newaxis], permuatation[np.newaxis, :]]
+            body_label = body_label[np.arange(16)[:, np.newaxis], permuatation[np.newaxis, :]]
+
+        item['human_points'] = torch.from_numpy(points).float()
+        item['pose'] = torch.from_numpy(pose).float()
+
+        if self.cfg.use_aug:
+            augmented_points = augment(points, points_num)
+            item['human_points'] = torch.from_numpy(augmented_points).float()
+
+        item['points_num'] = torch.from_numpy(points_num).int()
+        item['betas'] = torch.from_numpy(betas).float()
+        item['trans'] = torch.from_numpy(trans).float()
+
+        if self.cfg.use_boundary and boundary_label is not None:
+            if len(boundary_label.shape) == 3:
+                human_boundary_points = points * boundary_label
+                item['human_points'] = torch.from_numpy(human_boundary_points).float()
+            elif len(boundary_label.shape) == 2:
+                human_boundary_points = points * boundary_label[..., np.newaxis]
+                item['human_points'] = torch.from_numpy(human_boundary_points).float()
+
+        if boundary_label is not None:
+            if len(boundary_label.shape) == 3:
+                human_boundary_points = points * boundary_label
+                item['human_boundary'] = torch.from_numpy(human_boundary_points).float()
+            elif len(boundary_label.shape) == 2:
+                human_boundary_points = points * boundary_label[..., np.newaxis]
+                item['human_boundary'] = torch.from_numpy(human_boundary_points).float()
+
+        if self.cfg.inside_random and boundary_label is not None:
+            if len(boundary_label.shape) == 3:
+                boundary_label_ = boundary_label.astype(bool).squeeze()
+            elif len(boundary_label.shape) == 2:
+                boundary_label_ = boundary_label.astype(bool)
+            else:
+                boundary_label_ = None
+
+            if boundary_label_ is not None:
+                final_random = np.zeros((0, points.shape[1], points.shape[2]))
+                for idx in range(points.shape[0]):
+                    boundary_points = points[idx][boundary_label_[idx]]
+                    boundary_x, boundary_y, boundary_z = boundary_points[:, 0], boundary_points[:, 1], boundary_points[:, 2]
+                    inside_points = points[idx][~boundary_label_[idx]]
+                    random_noise = np.zeros_like(inside_points)
+                    for k in range(inside_points.shape[0]):
+                        point = inside_points[k]
+                        P_x, P_y, P_z = point[0], point[1], point[2]
+                        P_y = self.add_dis_xy(P_x, P_y, boundary_x, boundary_y)
+                        P_z = self.add_dis_z(P_x, P_y, P_z, boundary_x, boundary_y, boundary_z)
+                        random_noise[k] = np.array([P_x, P_y, P_z])
+                    random = np.concatenate((random_noise, boundary_points))
+                    np.random.shuffle(random)
+                    final_random = np.concatenate((final_random, random[np.newaxis, ...]))
+
+                item['human_points'] = torch.from_numpy(final_random).float()
+
+        if full_joints is not None:
+            item['full_joints'] = torch.from_numpy(full_joints).float()
+        if rotmats is not None:
+            item['rotmats'] = torch.from_numpy(rotmats).float()
+        if self.lidar_to_mocap_RT_flag:
+            item['lidar_to_mocap_RT'] = torch.from_numpy(lidar_to_mocap_RT).float()
+        if body_label is not None:
+            item['body_label'] = body_label.astype(np.float64)
+        if back_pc is not None:
+            item['back_pc'] = torch.from_numpy(back_pc).float()
+        if twice_noise is not None:
+            item['twice_noise'] = torch.from_numpy(twice_noise).float()
+
+        if plane_model is not None:
+            item['plane_model'] = torch.from_numpy(plane_model).float()
+
+        if self.cfg.concat_info:
+            concat = np.concatenate(
+                (item['human_points'], item['back_pc'], item['human_boundary']), axis=1)
+            item['human_points'] = concat
+
+        return item
+
+    def add_dis_xy(self, P_x_, P_y_, boundary_x_, boundary_y_):
+        error_x_index = np.argsort(np.abs(boundary_x_ - P_x_))
+        intial = boundary_y_[error_x_index[0]]
+        range_y = self.get_range(intial, P_y_, boundary_y_, error_x_index)
+        random_dis = random.uniform(range_y[0], range_y[1])
+        return P_y_ + random_dis
+
+    def add_dis_z(self, P_x_, P_y_, P_z_, boundary_x_, boundary_y_, boundary_z_):
+        error_x_index = np.argsort(
+            ((boundary_x_ - P_x_) ** 2 + (boundary_y_ - P_y_) ** 2) ** 0.5)
+        intial = boundary_z_[error_x_index[0]]
+        range_y = self.get_range(intial, P_z_, boundary_z_, error_x_index)
+        random_dis = random.uniform(range_y[0], range_y[1])
+        return P_z_ + random_dis
+
+    def get_range(self, intial, P, boundary, error_index):
+        for i in range(len(error_index)):
+            if intial < P < boundary[error_index[i + 1]]:
+                range_y = [intial - P, boundary[error_index[i + 1]] - P]
+                return range_y
+            elif boundary[error_index[i + 1]] < P < intial:
+                range_y = [boundary[error_index[i + 1]] - P, intial - P]
+                return range_y
+            else:
+                return [0, 0]
+
+    def __len__(self):
+        return self.length
+
+
+def create_cache_dataset(dataset_path, output_path=None, compress=True, chunk_size=1000):
+    """
+    此函数已弃用，请使用 tools/create_dataset_cache.py 脚本
+
+    原功能已迁移到工具脚本中:
+    python tools/create_dataset_cache.py --data-dir /path/to/data --output-dir ./cache
+
+    Args:
+        dataset_path: 数据目录（需包含train.txt和test.txt）
+        output_path: 输出目录
+        compress: 是否使用压缩
+        chunk_size: 分块大小
+    """
+    print("[DEPRECATED] create_cache_dataset函数已弃用")
+    print("[INFO] 请使用新工具脚本: python tools/create_dataset_cache.py --data-dir <path> --output-dir <dir>")
+    print(f"[INFO] 数据目录: {dataset_path}")
+    if output_path:
+        print(f"[INFO] 输出目录: {output_path}")
+    return None
