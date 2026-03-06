@@ -5,7 +5,7 @@ LidarCap数据集缓存制作工具
 从原始数据直接生成HDF5格式的训练集和测试集缓存文件。
 
 使用方法:
-    python tools/create_dataset_cache.py \
+    python tools/dataset_cache/generate.py \
         --data-dir /path/to/lidarhuman26M \
         --output-dir ./cache
 """
@@ -18,8 +18,11 @@ from tqdm import tqdm
 import h5py
 import numpy as np
 
-project_root = Path(__file__).resolve().parent.parent
-sys.path.append(str(project_root))
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parent.parent
+
+os.chdir(project_root)
+sys.path.insert(0, str(project_root))
 
 
 def read_ids_from_file(filepath):
@@ -59,8 +62,8 @@ def create_hdf5_from_raw(raw_data_path, output_path, ids, seargs):
 
             T = poses.shape[0] * seargs.seqlen
 
-            all_data['pose'].append(poses.reshape(T))
-            all_data['shape'].append(betas.reshape(T))
+            all_data['pose'].append(poses.reshape(T, 72))
+            all_data['shape'].append(betas.reshape(T, 10))
             all_data['trans'].append(trans.reshape(T, 3))
             all_data['point_clouds'].append(point_clouds.reshape(T, seargs.npoints, 3))
             all_data['points_num'].append(points_nums.reshape(T))
@@ -122,7 +125,7 @@ def main():
 
     parser.add_argument('--data-dir', dest='data_dir', required=True,
                        help='原始数据目录（包含train.txt和test.txt）')
-    parser.add_argument('--output', dest='output_dir', default='./cache',
+    parser.add_argument('--output-dir', dest='output_dir', default='./cache',
                        help='输出目录（默认: ./cache）')
     parser.add_argument('--seqlen', dest='seqlen', type=int, default=16,
                        help='序列长度（默认: 16）')

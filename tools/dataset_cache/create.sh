@@ -6,7 +6,7 @@
 
 # 默认配置
 DATA_DIR="${DATA_DIR:-/mnt/66bc2970-1c9c-4d90-a36c-2c7ecd0299d6/datasets/lidarhuman26M}"
-OUTPUT_DIR="${OUTPUT_DIR:-./cache}"
+OUTPUT_DIR="${OUTPUT_DIR:-${DATA_DIR}}"
 SEQLEN="${SEQLEN:-16}"
 NPOINTS="${NPOINTS:-512}"
 CHUNK_SIZE="${CHUNK_SIZE:-1000}"
@@ -103,7 +103,7 @@ if [[ ! -f "$PYTHON_SCRIPT" ]]; then
 fi
 
 # 构建命令
-CMD="python3 $PYTHON_SCRIPT --data-dir $DATA_DIR --output-dir $OUTPUT_DIR --seqlen $SEQLEN --npoints $NPOINTS --chunk-size $CHUNK_SIZE"
+CMD="python $PYTHON_SCRIPT --data-dir $DATA_DIR --output-dir $OUTPUT_DIR --seqlen $SEQLEN --npoints $NPOINTS --chunk-size $CHUNK_SIZE"
 
 # 添加压缩选项
 if [[ -n "$COMPRESS" ]]; then
