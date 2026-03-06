@@ -9,6 +9,9 @@ import signal
 import json
 import glob
 import datetime
+import copy
+import time
+from collections import deque
 
 from config import DATASET_DIR
 from datasets.lidarcap_dataset import collate, TemporalDataset
@@ -18,6 +21,16 @@ from modules.loss import Loss
 from tools import common, crafter, multiprocess
 from tools.util import save_smpl_ply
 from tqdm import tqdm
+
+# 尝试导入混合精度训练支持
+try:
+    from torch.cuda.amp import autocast, GradScaler
+    AMP_AVAILABLE = True
+except ImportError:
+    AMP_AVAILABLE = False
+    autocast = None
+    GradScaler = None
+
 torch.set_num_threads(1)
 
 def setup_logger(log_dir, debug=False):
@@ -56,16 +69,126 @@ def setup_logger(log_dir, debug=False):
     
     return logger
 
+class EarlyStopping:
+    """早停机制，当验证损失不再改善时提前终止训练"""
+    def __init__(self, patience=10, min_delta=0.001, mode='min', restore_best_weights=True):
+        """
+        Args:
+            patience: 容忍的epoch数，在该epoch数内验证损失没有改善则停止
+            min_delta: 认为是改善的最小变化量
+            mode: 'min' 或 'max'，监控指标是最小化还是最大化
+            restore_best_weights: 停止时是否恢复最佳模型权重
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.restore_best_weights = restore_best_weights
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.best_weights = None
+        
+        if mode == 'min':
+            self.monitor_op = lambda x, y: x < y - min_delta
+            self.best_score = float('inf')
+        else:
+            self.monitor_op = lambda x, y: x > y + min_delta
+            self.best_score = float('-inf')
+    
+    def __call__(self, score, model):
+        """
+        Args:
+            score: 当前epoch的监控指标值
+            model: 模型对象，用于保存最佳权重
+        Returns:
+            True: 应该停止训练
+            False: 继续训练
+        """
+        if self.monitor_op(score, self.best_score):
+            self.best_score = score
+            self.counter = 0
+            if self.restore_best_weights:
+                self.best_weights = copy.deepcopy(model.state_dict())
+            return False
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+                if self.restore_best_weights and self.best_weights is not None:
+                    model.load_state_dict(self.best_weights)
+                return True
+            return False
+    
+    def reset(self):
+        """重置早停计数器"""
+        self.counter = 0
+        self.best_score = float('inf') if self.mode == 'min' else float('-inf')
+        self.early_stop = False
+        self.best_weights = None
+
+
 class MyTrainer(crafter.Trainer):
+    def __init__(self, net, loader, loss, optimizer, log_interval,
+                 use_amp=False, grad_clip=None):
+        """
+        Args:
+            net: 神经网络模型
+            loader: 数据加载器
+            loss: 损失函数
+            optimizer: 优化器
+            log_interval: 日志打印间隔
+            use_amp: 是否使用混合精度训练
+            grad_clip: 梯度裁剪的最大范数，None表示不裁剪
+        """
+        super().__init__(net, loader, loss, optimizer, log_interval)
+        self.use_amp = use_amp and AMP_AVAILABLE
+        self.grad_clip = grad_clip
+        self.scaler = GradScaler() if self.use_amp else None
+        
+        if self.use_amp:
+            logging.info("混合精度训练已启用")
+        if self.grad_clip:
+            logging.info(f"梯度裁剪已启用，max_norm={self.grad_clip}")
+    
     def forward_backward(self, inputs):
-        output = self.net(inputs)
-        loss, details = self.loss_func(**output)
-        loss.backward()
+        if self.use_amp:
+            with autocast():
+                output = self.net(inputs)
+                loss, details = self.loss_func(**output)
+            
+            # 混合精度反向传播
+            self.scaler.scale(loss).backward()
+            
+            # 梯度裁剪
+            if self.grad_clip is not None:
+                self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip)
+            
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            output = self.net(inputs)
+            loss, details = self.loss_func(**output)
+            loss.backward()
+            
+            # 梯度裁剪
+            if self.grad_clip is not None:
+                torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip)
+            
+            self.optimizer.step()
+        
+        self.optimizer.zero_grad()
         return details
 
     def forward_val(self, inputs):
-        output = self.net(inputs)
-        loss, details = self.loss_func(**output)
+        # 验证时也支持混合精度
+        if self.use_amp:
+            with autocast():
+                output = self.net(inputs)
+                loss, details = self.loss_func(**output)
+        else:
+            output = self.net(inputs)
+            loss, details = self.loss_func(**output)
         return details
 
     def forward_net(self, inputs):
@@ -138,12 +261,16 @@ class TrainingManager:
         self.logger.info(f"Loaded checkpoint from epoch {checkpoint['epoch']}")
         return checkpoint
         
-    def save_epoch_result(self, epoch, train_loss, val_loss):
-        """Save epoch results"""
+    def save_epoch_result(self, epoch, train_loss, val_loss, lr=None, train_time=0, val_time=0):
+        """Save epoch results with additional metrics"""
         result = {
             'epoch': epoch,
             'train_loss': float(train_loss),
-            'val_loss': float(val_loss)
+            'val_loss': float(val_loss),
+            'learning_rate': lr if lr is not None else 0.0,
+            'train_time_seconds': train_time,
+            'val_time_seconds': val_time,
+            'timestamp': datetime.datetime.now().isoformat()
         }
         
         # Load existing results
@@ -199,12 +326,42 @@ def cleanup_old_checkpoints(model_dir, keep_last=5, logger=None):
         if logger:
             logger.warning(f"Failed to cleanup old checkpoints: {e}")
 
+class WarmupScheduler:
+    """学习率预热调度器，在前几个epoch线性增加学习率"""
+    def __init__(self, optimizer, warmup_epochs, target_lr, min_lr=1e-8):
+        """
+        Args:
+            optimizer: PyTorch优化器
+            warmup_epochs: 预热的epoch数
+            target_lr: 预热结束后的目标学习率
+            min_lr: 初始最小学习率
+        """
+        self.optimizer = optimizer
+        self.warmup_epochs = warmup_epochs
+        self.target_lr = target_lr
+        self.min_lr = min_lr
+        self.current_epoch = 0
+    
+    def step(self):
+        """更新学习率"""
+        if self.current_epoch < self.warmup_epochs:
+            # 线性增加
+            lr = self.min_lr + (self.target_lr - self.min_lr) * (self.current_epoch / self.warmup_epochs)
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = lr
+        self.current_epoch += 1
+    
+    def get_lr(self):
+        """获取当前学习率"""
+        return self.optimizer.param_groups[0]['lr']
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # bs
     parser.add_argument('--bs', type=int, default=16,
-                        help='input batch size for training (default: 24)')
+                        help='input batch size for training (default: 16)')
     parser.add_argument('--eval_bs', type=int, default=16,
                         help='input batch size for evaluation')
     # threads
@@ -218,9 +375,9 @@ if __name__ == '__main__':
                         help='Learning rate (default: 0.0001)')
     # epochs
     parser.add_argument('--epochs', type=int, default=200,
-                        help='Traning epochs (default: 200)')
+                        help='Training epochs (default: 200)')
     parser.add_argument('--log_interval', type=int, default=100,
-                        help='Traning epochs (default: 100)')
+                        help='Log interval (default: 100)')
     # dataset
     parser.add_argument("--dataset", type=str, required=True)
     # debug
@@ -243,6 +400,40 @@ if __name__ == '__main__':
     # resume training
     parser.add_argument('--resume', type=str, default=None,
                         help='path to the run directory to resume training from (e.g., output/run_1234567890)')
+    
+    # 早停机制参数
+    parser.add_argument('--early_stopping', type=int, default=15,
+                        help='Early stopping patience (default: 15, 0 to disable)')
+    parser.add_argument('--early_stopping_min_delta', type=float, default=0.001,
+                        help='Early stopping minimum delta (default: 0.001)')
+    
+    # 梯度裁剪
+    parser.add_argument('--grad_clip', type=float, default=None,
+                        help='Gradient clipping max norm (default: None, disabled)')
+    
+    # 混合精度训练
+    parser.add_argument('--use_amp', action='store_true',
+                        help='Use automatic mixed precision training')
+    
+    # 学习率预热
+    parser.add_argument('--warmup_epochs', type=int, default=0,
+                        help='Number of warmup epochs (default: 0, disabled)')
+    parser.add_argument('--warmup_min_lr', type=float, default=1e-8,
+                        help='Minimum learning rate for warmup (default: 1e-8)')
+    
+    # 学习率调度器参数
+    parser.add_argument('--lr_patience', type=int, default=5,
+                        help='LR scheduler patience (default: 5)')
+    parser.add_argument('--lr_factor', type=float, default=0.5,
+                        help='LR scheduler reduction factor (default: 0.5)')
+    parser.add_argument('--lr_min', type=float, default=1e-7,
+                        help='Minimum learning rate (default: 1e-7)')
+    
+    # 检查点保存策略
+    parser.add_argument('--save_every', type=int, default=1,
+                        help='Save checkpoint every N epochs (default: 1)')
+    parser.add_argument('--keep_checkpoints', type=int, default=5,
+                        help='Number of recent checkpoints to keep (default: 5)')
 
     args = parser.parse_args()
 
@@ -287,6 +478,37 @@ if __name__ == '__main__':
     from yacs.config import CfgNode
     cfg = CfgNode.load_cfg(open('base.yaml'))
     
+    # 从配置文件中获取训练策略参数（如果命令行参数未提供）
+    # 命令行参数优先级高于配置文件
+    def get_config_value(args_value, config_key, default_value):
+        """获取参数值，优先使用命令行参数，其次使用配置文件，最后使用默认值"""
+        if args_value is not None and args_value != default_value:
+            return args_value
+        try:
+            config_value = cfg.TRAIN.GEN.get(config_key, default_value)
+            return config_value
+        except:
+            return default_value
+    
+    # 获取训练策略参数
+    lr = get_config_value(args.lr, 'LR', 0.0001)
+    lr_patience = get_config_value(args.lr_patience, 'patience', 5)
+    lr_factor = get_config_value(args.lr_factor, 'factor', 0.5)
+    lr_min = get_config_value(args.lr_min, 'min_lr', 1e-7)
+    lr_threshold = get_config_value(0.001, 'threshold', 0.001)
+    
+    early_stopping_patience = get_config_value(args.early_stopping, 'early_stopping', 15)
+    early_stopping_min_delta = get_config_value(args.early_stopping_min_delta, 'early_stopping_min_delta', 0.001)
+    
+    grad_clip = get_config_value(args.grad_clip, 'grad_clip', None)
+    use_amp = args.use_amp or cfg.TRAIN.GEN.get('use_amp', False)
+    
+    warmup_epochs = get_config_value(args.warmup_epochs, 'warmup_epochs', 0)
+    warmup_min_lr = get_config_value(args.warmup_min_lr, 'warmup_min_lr', 1e-8)
+    
+    save_every = get_config_value(args.save_every, 'save_every', 1)
+    keep_checkpoints = get_config_value(args.keep_checkpoints, 'keep_checkpoints', 5)
+    
     # Load training and validation data
     if args.eval:
         test_dataset = TemporalDataset(cfg.TestDataset)
@@ -306,14 +528,49 @@ if __name__ == '__main__':
     net = Regressor()
     loss = Loss()
 
-    # Define optimizer
+    # Define optimizer with improved parameters
     optimizer = torch.optim.Adam([p for p in net.parameters() if p.requires_grad],
-                                 lr=args.lr, weight_decay=1e-4)
-    sc = {'factor': 0.9, 'patience': 1, 'threshold': 0.01, 'min_lr': 0.00000003}
+                                 lr=lr, weight_decay=1e-4, eps=1e-8, amsgrad=True)
+    
+    # 改进的学习率调度器配置
+    sc = {
+        'factor': lr_factor,
+        'patience': lr_patience,
+        'threshold': lr_threshold,
+        'min_lr': lr_min
+    }
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 'min', factor=sc['factor'], patience=sc['patience'],
-        threshold_mode='rel', threshold=sc['threshold'], min_lr=sc['min_lr'])
+        threshold_mode='rel', threshold=sc['threshold'], min_lr=sc['min_lr'],
+        verbose=True)
 
+    # 初始化预热调度器
+    warmup_scheduler = WarmupScheduler(optimizer, warmup_epochs, lr, warmup_min_lr) if warmup_epochs > 0 else None
+
+    # 初始化早停机制
+    early_stopping = None
+    if early_stopping_patience > 0:
+        early_stopping = EarlyStopping(
+            patience=early_stopping_patience,
+            min_delta=early_stopping_min_delta,
+            mode='min',
+            restore_best_weights=True
+        )
+        logger.info(f"Early stopping enabled: patience={early_stopping_patience}, min_delta={early_stopping_min_delta}")
+    
+    # 记录训练配置
+    logger.info("=== 训练配置 ===")
+    logger.info(f"学习率: {lr}")
+    logger.info(f"批次大小: {args.bs}")
+    logger.info(f"权重衰减: 1e-4")
+    logger.info(f"学习率调度器: ReduceLROnPlateau(factor={sc['factor']}, patience={sc['patience']}, min_lr={sc['min_lr']})")
+    if warmup_scheduler:
+        logger.info(f"预热启用: {warmup_epochs} epochs, 从 {warmup_min_lr} 到 {lr}")
+    if use_amp:
+        logger.info("混合精度训练: 已启用")
+    if grad_clip:
+        logger.info(f"梯度裁剪: max_norm={grad_clip}")
+    
     # Initialize training manager
     training_manager = TrainingManager(model_dir, logger)
     
@@ -330,7 +587,8 @@ if __name__ == '__main__':
             net.load_state_dict(checkpoint['model_state_dict'])
             
             # Move model to GPU first if using CUDA
-            train = MyTrainer(net, loader, loss, optimizer, args.log_interval)
+            train = MyTrainer(net, loader, loss, optimizer, args.log_interval,
+                             use_amp=use_amp, grad_clip=grad_clip)
             if iscuda:
                 train = train.cuda()
             
@@ -351,10 +609,11 @@ if __name__ == '__main__':
                     logger.info(f"  Epoch {result['epoch']}: Train={result['train_loss']:.6f}, Val={result['val_loss']:.6f}")
         else:
             # Instance trainer normally if no checkpoint
-            train = MyTrainer(net, loader, loss, optimizer, args.log_interval)
+            train = MyTrainer(net, loader, loss, optimizer, args.log_interval,
+                             use_amp=use_amp, grad_clip=grad_clip)
             if iscuda:
                 train = train.cuda()
-                    
+                
     elif args.ckpt_path is not None:
         logger.info(f"Loading checkpoint from {args.ckpt_path}")
         save_model = torch.load(args.ckpt_path)['state_dict']
@@ -365,12 +624,14 @@ if __name__ == '__main__':
         net.load_state_dict(model_dict)
         
         # Instance trainer
-        train = MyTrainer(net, loader, loss, optimizer, args.log_interval)
+        train = MyTrainer(net, loader, loss, optimizer, args.log_interval,
+                         use_amp=use_amp, grad_clip=grad_clip)
         if iscuda:
             train = train.cuda()
     else:
         # Instance trainer
-        train = MyTrainer(net, loader, loss, optimizer, args.log_interval)
+        train = MyTrainer(net, loader, loss, optimizer, args.log_interval,
+                         use_amp=use_amp, grad_clip=grad_clip)
         if iscuda:
             train = train.cuda()
 
@@ -421,23 +682,40 @@ if __name__ == '__main__':
         
         try:
             for epoch in range(start_epoch, args.epochs + 1):
+                epoch_start_time = time.time()
                 logger.info(f"Starting epoch {epoch}/{args.epochs}")
+                logger.info(f"Current learning rate: {optimizer.param_groups[0]['lr']:.8f}")
+                
+                # 应用预热学习率
+                if warmup_scheduler is not None and epoch <= warmup_scheduler.warmup_epochs:
+                    warmup_scheduler.step()
+                    logger.info(f"Warmup learning rate: {optimizer.param_groups[0]['lr']:.8f}")
                 
                 # Training
+                train_start_time = time.time()
                 train_loss_dict = train(epoch)
-                logger.info(f"Epoch {epoch} - Training completed, loss: {train_loss_dict['loss']:.6f}")
+                train_time = time.time() - train_start_time
+                logger.info(f"Epoch {epoch} - Training completed, loss: {train_loss_dict['loss']:.6f}, time: {train_time:.2f}s")
                 
                 # Validation
+                val_start_time = time.time()
                 val_loss_dict = train(epoch, train=False)
-                logger.info(f"Epoch {epoch} - Validation completed, loss: {val_loss_dict['loss']:.6f}")
+                val_time = time.time() - val_start_time
+                logger.info(f"Epoch {epoch} - Validation completed, loss: {val_loss_dict['loss']:.6f}, time: {val_time:.2f}s")
+                
+                epoch_time = time.time() - epoch_start_time
+                current_lr = optimizer.param_groups[0]['lr']
                 
                 # Log training progress
                 logger.info(f"Epoch {epoch}/{args.epochs} - "
                            f"Train Loss: {train_loss_dict['loss']:.6f}, "
-                           f"Val Loss: {val_loss_dict['loss']:.6f}")
+                           f"Val Loss: {val_loss_dict['loss']:.6f}, "
+                           f"LR: {current_lr:.8f}, "
+                           f"Epoch Time: {epoch_time:.2f}s")
 
-                # Save epoch results
-                training_manager.save_epoch_result(epoch, train_loss_dict['loss'], val_loss_dict['loss'])
+                # Save epoch results with timing info
+                training_manager.save_epoch_result(epoch, train_loss_dict['loss'], val_loss_dict['loss'],
+                                                  lr=current_lr, train_time=train_time, val_time=val_time)
 
                 # save model in this epoch
                 # if this model is better, then save it as best
@@ -453,16 +731,30 @@ if __name__ == '__main__':
                     torch.save({'state_dict': net.state_dict()}, best_save)
                     logger.info(f"NEW BEST VALIDATION LOSS! Saving model at epoch {epoch} (loss: {minvloss:.6f})")
 
-                # scheduler
-                old_lr = optimizer.param_groups[0]['lr']
-                scheduler.step(train_loss_dict['loss'])
-                new_lr = optimizer.param_groups[0]['lr']
+                # 学习率调度器（不在预热期间使用）
+                if warmup_scheduler is None or epoch > warmup_scheduler.warmup_epochs:
+                    old_lr = optimizer.param_groups[0]['lr']
+                    scheduler.step(val_loss_dict['loss'])  # 使用验证损失调整学习率
+                    new_lr = optimizer.param_groups[0]['lr']
+                    
+                    if new_lr != old_lr:
+                        logger.info(f"Learning rate reduced from {old_lr:.8f} to {new_lr:.8f}")
                 
-                if new_lr != old_lr:
-                    logger.info(f"Learning rate reduced from {old_lr:.8f} to {new_lr:.8f}")
+                # 早停检查（使用验证损失）
+                if early_stopping is not None:
+                    if early_stopping(val_loss_dict['loss'], net):
+                        logger.info(f"Early stopping triggered at epoch {epoch}")
+                        logger.info(f"No improvement in validation loss for {early_stopping.patience} epochs")
+                        logger.info(f"Best validation loss: {early_stopping.best_score:.6f}")
+                        break
                 
-                # Save progress after each epoch
-                training_manager.save_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
+                # Save progress after each epoch (or every N epochs)
+                if epoch % save_every == 0:
+                    training_manager.save_progress_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
+                
+                # 定期清理旧检查点
+                if epoch % 10 == 0:
+                    cleanup_old_checkpoints(model_dir, keep_last=keep_checkpoints, logger=logger)
 
                 # Check if we should stop (Ctrl+C was pressed)
                 if training_manager.should_stop:
@@ -476,11 +768,16 @@ if __name__ == '__main__':
         except Exception as e:
             logger.error(f"Training failed with error: {e}", exc_info=True)
             # Save progress even if training fails
-            training_manager.save_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
+            try:
+                training_manager.save_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
+            except:
+                pass
             raise
             
         logger.info("=== TRAINING SUMMARY ===")
-        logger.info(f"Training completed. Best train loss: {mintloss:.6f}, Best valid loss: {minvloss:.6f}")
+        logger.info(f"Training completed at epoch {epoch}")
+        logger.info(f"Best train loss: {mintloss:.6f}")
+        logger.info(f"Best valid loss: {minvloss:.6f}")
         logger.info(f"All checkpoints and results saved in: {model_dir}")
         logger.info(f"Log files saved in: {log_dir}")
         
@@ -489,9 +786,10 @@ if __name__ == '__main__':
         if history and len(history) > 0:
             logger.info("Final training history (last 10 epochs):")
             for result in history[-10:]:
-                logger.info(f"  Epoch {result['epoch']}: Train={result['train_loss']:.6f}, Val={result['val_loss']:.6f}")
+                logger.info(f"  Epoch {result['epoch']}: Train={result['train_loss']:.6f}, Val={result['val_loss']:.6f}, "
+                          f"LR={result.get('learning_rate', 0):.8f}")
         
-        # Clean up old checkpoints (keep only last 5 and best models)
-        logger.info("Cleaning up old checkpoint files...")
-        cleanup_old_checkpoints(model_dir, keep_last=5, logger=logger)
+        # Clean up old checkpoints (keep only last N and best models)
+        logger.info(f"Cleaning up old checkpoint files, keeping last {keep_checkpoints}...")
+        cleanup_old_checkpoints(model_dir, keep_last=keep_checkpoints, logger=logger)
         logger.info("Training pipeline completed successfully!")
