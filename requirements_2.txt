@@ -1,0 +1,14 @@
+
+# pip install --no-build-isolation -r ./requirements_2.txt
+# git+https://github.com/octree-nn/ocnn-pytorch.git
+# git+https://github.com/openai/CLIP.git
+# git+https://github.com/mattloper/chumpy.git
+git+https://github.com/Dao-AILab/flash-attention.git
+./libs/CLIP
+./libs/chamfer_dist
+./libs/chumpy
+./libs/mamba
+./libs/ocnn-pytorch
+./libs/pointgroup_ops
+./libs/pointnet2_ops_lib
+./libs/pointops

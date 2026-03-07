@@ -1,9 +1,0 @@
-git+https://github.com/octree-nn/ocnn-pytorch.git
-git+https://github.com/openai/CLIP.git
-git+https://github.com/mattloper/chumpy.git
-git+https://github.com/state-spaces/mamba.git
-./libs/pointops
-./libs/pointgroup_ops
-./libs/pointnet2_ops_lib
-./libs/chamfer_dist
-# pip install --no-build-isolation flash-attn
