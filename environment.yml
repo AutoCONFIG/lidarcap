@@ -6,9 +6,9 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - pip
-  - google-sparsehash
   - cuda-toolkit
+  - google-sparsehash
+  - pip
   - python=3.12
   - pip:
     - cuda-toolkit[all]==12.8.1
@@ -27,10 +27,10 @@ dependencies:
     - scipy
     - seaborn
     - tensorflow
-    - torch==2.9.1
+    - timm
+    - torch==2.7.1
     - torchaudio
     - torchvision
     - tqdm
-    - timm
     - wandb
     - yacs
