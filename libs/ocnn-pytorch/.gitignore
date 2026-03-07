@@ -1,0 +1,12 @@
+.vscode
+__pycache__
+build
+docs/source/generated
+ocnn.egg-info
+dist
+data
+logs
+*.sh
+*.xyz
+thsolver
+benchmark

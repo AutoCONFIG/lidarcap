@@ -1,5 +1,6 @@
 from modules.geometry import rot6d_to_rotmat
 from modules.st_gcn import STGCN
+from modules.mamba import MambaTemporal
 from pointnet2_ops.pointnet2_modules import PointnetSAModule
 from typing import Tuple
 from pointnet2_ops import pointnet2_utils
@@ -242,7 +243,7 @@ class Regressor(nn.Module):
     def __init__(self):
         super().__init__()
         self.encoder = PointNet2Encoder()
-        self.pose_s1 = RNN(1024 + 384, 24 * 3, 1024)  # 注意融合后维度变为1024+256
+        self.pose_s1 = MambaTemporal(1024 + 384, 24 * 3, 1024)  # 使用Mamba替换双向GRU
         self.pose_s2 = STGCN(3 + 1024 + 384)          # 对应拼接后的特征输入
         self.pointr = PoinTr(
             trans_dim=384,
