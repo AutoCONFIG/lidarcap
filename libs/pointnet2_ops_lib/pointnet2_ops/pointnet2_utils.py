@@ -20,7 +20,9 @@ except ImportError:
     )
     _ext_headers = glob.glob(osp.join(_ext_src_root, "include", "*"))
 
-    os.environ["TORCH_CUDA_ARCH_LIST"] = "3.7+PTX;5.0;6.0;6.1;6.2;7.0;7.5"
+    # 使用 +PTX 自动适应当前和未来的 GPU 架构
+    os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0+PTX;8.6+PTX;8.9+PTX;9.0+PTX;10.0+PTX;12.0+PTX"
+
     _ext = load(
         "_ext",
         sources=_ext_sources,

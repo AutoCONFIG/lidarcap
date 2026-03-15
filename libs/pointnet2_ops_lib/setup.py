@@ -16,7 +16,10 @@ requirements = ["torch>=1.4"]
 
 exec(open(osp.join("pointnet2_ops", "_version.py")).read())
 
-os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0;8.6;8.9;9.0"
+# 使用 +PTX 后缀，这样可以自动适应当前和未来的 GPU 架构
+# +PTX: 生成 PTX 代码，在运行时 JIT 编译为当前 GPU 的架构
+os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0+PTX;8.6+PTX;8.9+PTX;9.0+PTX;10.0+PTX;12.0+PTX"
+
 setup(
     name="pointnet2_ops",
     version=__version__,
