@@ -14,7 +14,14 @@ def istarmap(self, func, iterable, chunksize=1):
             "Chunksize must be 1+, not {0:n}".format(chunksize))
 
     task_batches = mpp.Pool._get_tasks(func, iterable, chunksize)
-    result = mpp.IMapIterator(self._cache)
+    
+    # Python 3.12+ compatibility: _cache is now a _PoolCache object
+    if hasattr(self, '_cache') and hasattr(self._cache, '_cache'):
+        # Python 3.12+: _cache is a _PoolCache object with its own _cache dict
+        result = mpp.IMapIterator(self._cache._cache)
+    else:
+        # Python <3.12: _cache is directly the cache dict
+        result = mpp.IMapIterator(self._cache)
     self._taskqueue.put((self._guarded_task_generation(
         result._job, mpp.starmapstar, task_batches), result._set_length))
     return (item for chunk in result for item in chunk)

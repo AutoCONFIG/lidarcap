@@ -114,7 +114,8 @@ class Trainer(Crafter):
                 details = self.forward_backward(inputs)
                 self.optimizer.step()
             else:
-                details = self.forward_val(inputs)
+                with torch.no_grad():
+                    details = self.forward_val(inputs)
 
             for k, v in details.items():
                 if type(v) is not dict:

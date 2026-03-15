@@ -23,19 +23,19 @@ DATASET="lidarcap"
 GPU="0"
 
 # 训练批次大小
-BS=16
+BS=4
 
 # 评估批次大小
-EVAL_BS=16
+EVAL_BS=1
 
 # 线程数
-THREADS=4
+THREADS=6
 
 # 训练轮数
 EPOCHS=200
 
 # 输出目录
-OUTPUT_DIR="output"
+OUTPUT_DIR="/media/yun/nfs_giga/lidarcap_output"
 
 # 日志间隔
 LOG_INTERVAL=100

@@ -474,7 +474,7 @@ if __name__ == '__main__':
             train_dataset, batch_size=args.bs, shuffle=True, num_workers=args.threads, pin_memory=True, collate_fn=collate)
         valid_dataset = TemporalDataset(cfg=cfg.TestDataset, dataset=dataset_name, train=False)
         valid_loader = torch.utils.data.DataLoader(
-            valid_dataset, batch_size=args.bs, shuffle=False, num_workers=args.threads, pin_memory=True, collate_fn=collate)
+            valid_dataset, batch_size=args.eval_bs, shuffle=False, num_workers=args.threads, pin_memory=True, collate_fn=collate)
         loader = {'Train': train_loader, 'Valid': valid_loader}
 
     net = Regressor()
@@ -628,7 +628,7 @@ if __name__ == '__main__':
         logger.info(f"Model directory: {model_dir}")
         logger.info(f"Current best - Train Loss: {mintloss:.6f}, Val Loss: {minvloss:.6f}")
         logger.info(f"Dataset: {dataset_name}")
-        logger.info(f"Batch size: {args.bs}, Learning rate: {args.lr}")
+        logger.info(f"Batch size: {args.bs}, Learning rate: {lr}")
         logger.info(f"Using GPU: {args.gpu if iscuda else 'CPU'}")
         
         try:
