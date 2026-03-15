@@ -370,9 +370,6 @@ if __name__ == '__main__':
     # gpu
     parser.add_argument('--gpu', type=int,
                         default=[0], help='-1 for CPU', nargs='+')
-    # lr
-    parser.add_argument('--lr', type=float, default=0.0001,
-                        help='Learning rate (default: 0.0001)')
     # epochs
     parser.add_argument('--epochs', type=int, default=200,
                         help='Training epochs (default: 200)')
@@ -401,39 +398,6 @@ if __name__ == '__main__':
     parser.add_argument('--resume', type=str, default=None,
                         help='path to the run directory to resume training from (e.g., output/run_1234567890)')
     
-    # 早停机制参数
-    parser.add_argument('--early_stopping', type=int, default=15,
-                        help='Early stopping patience (default: 15, 0 to disable)')
-    parser.add_argument('--early_stopping_min_delta', type=float, default=0.001,
-                        help='Early stopping minimum delta (default: 0.001)')
-    
-    # 梯度裁剪
-    parser.add_argument('--grad_clip', type=float, default=None,
-                        help='Gradient clipping max norm (default: None, disabled)')
-    
-    # 混合精度训练
-    parser.add_argument('--use_amp', action='store_true',
-                        help='Use automatic mixed precision training')
-    
-    # 学习率预热
-    parser.add_argument('--warmup_epochs', type=int, default=0,
-                        help='Number of warmup epochs (default: 0, disabled)')
-    parser.add_argument('--warmup_min_lr', type=float, default=1e-8,
-                        help='Minimum learning rate for warmup (default: 1e-8)')
-    
-    # 学习率调度器参数
-    parser.add_argument('--lr_patience', type=int, default=5,
-                        help='LR scheduler patience (default: 5)')
-    parser.add_argument('--lr_factor', type=float, default=0.5,
-                        help='LR scheduler reduction factor (default: 0.5)')
-    parser.add_argument('--lr_min', type=float, default=1e-7,
-                        help='Minimum learning rate (default: 1e-7)')
-    
-    # 检查点保存策略
-    parser.add_argument('--save_every', type=int, default=1,
-                        help='Save checkpoint every N epochs (default: 1)')
-    parser.add_argument('--keep_checkpoints', type=int, default=5,
-                        help='Number of recent checkpoints to keep (default: 5)')
 
     args = parser.parse_args()
 
@@ -478,36 +442,24 @@ if __name__ == '__main__':
     from yacs.config import CfgNode
     cfg = CfgNode.load_cfg(open('base.yaml'))
     
-    # 从配置文件中获取训练策略参数（如果命令行参数未提供）
-    # 命令行参数优先级高于配置文件
-    def get_config_value(args_value, config_key, default_value):
-        """获取参数值，优先使用命令行参数，其次使用配置文件，最后使用默认值"""
-        if args_value is not None and args_value != default_value:
-            return args_value
-        try:
-            config_value = cfg.TRAIN.GEN.get(config_key, default_value)
-            return config_value
-        except:
-            return default_value
+    # 从配置文件中获取训练策略参数
+    lr = cfg.TRAIN.GEN.get('LR', 0.0001)
+    lr_patience = cfg.TRAIN.GEN.get('patience', 5)
+    lr_factor = cfg.TRAIN.GEN.get('factor', 0.5)
+    lr_min = cfg.TRAIN.GEN.get('min_lr', 1e-7)
+    lr_threshold = cfg.TRAIN.GEN.get('threshold', 0.001)
     
-    # 获取训练策略参数
-    lr = get_config_value(args.lr, 'LR', 0.0001)
-    lr_patience = get_config_value(args.lr_patience, 'patience', 5)
-    lr_factor = get_config_value(args.lr_factor, 'factor', 0.5)
-    lr_min = get_config_value(args.lr_min, 'min_lr', 1e-7)
-    lr_threshold = get_config_value(0.001, 'threshold', 0.001)
+    early_stopping_patience = cfg.TRAIN.GEN.get('early_stopping', 15)
+    early_stopping_min_delta = cfg.TRAIN.GEN.get('early_stopping_min_delta', 0.001)
     
-    early_stopping_patience = get_config_value(args.early_stopping, 'early_stopping', 15)
-    early_stopping_min_delta = get_config_value(args.early_stopping_min_delta, 'early_stopping_min_delta', 0.001)
+    grad_clip = cfg.TRAIN.GEN.get('grad_clip', None)
+    use_amp = cfg.TRAIN.GEN.get('use_amp', False)
     
-    grad_clip = get_config_value(args.grad_clip, 'grad_clip', None)
-    use_amp = args.use_amp or cfg.TRAIN.GEN.get('use_amp', False)
+    warmup_epochs = cfg.TRAIN.GEN.get('warmup_epochs', 0)
+    warmup_min_lr = cfg.TRAIN.GEN.get('warmup_min_lr', 1e-8)
     
-    warmup_epochs = get_config_value(args.warmup_epochs, 'warmup_epochs', 0)
-    warmup_min_lr = get_config_value(args.warmup_min_lr, 'warmup_min_lr', 1e-8)
-    
-    save_every = get_config_value(args.save_every, 'save_every', 1)
-    keep_checkpoints = get_config_value(args.keep_checkpoints, 'keep_checkpoints', 5)
+    save_every = cfg.TRAIN.GEN.get('save_every', 1)
+    keep_checkpoints = cfg.TRAIN.GEN.get('keep_checkpoints', 5)
     
     # Load training and validation data
     if args.eval:
@@ -541,8 +493,7 @@ if __name__ == '__main__':
     }
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 'min', factor=sc['factor'], patience=sc['patience'],
-        threshold_mode='rel', threshold=sc['threshold'], min_lr=sc['min_lr'],
-        verbose=True)
+        threshold_mode='rel', threshold=sc['threshold'], min_lr=sc['min_lr'])
 
     # 初始化预热调度器
     warmup_scheduler = WarmupScheduler(optimizer, warmup_epochs, lr, warmup_min_lr) if warmup_epochs > 0 else None

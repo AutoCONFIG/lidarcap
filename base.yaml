@@ -12,7 +12,7 @@ TRAIN:
     min_lr: 1e-7                  # 最小学习率（默认：1e-7）
     
     # 早停机制参数
-    early_stopping: 15             # 早停容忍的epoch数（默认：15，设为0禁用）
+    early_stopping: 150             # 早停容忍的epoch数（默认：15，设为0禁用）
     early_stopping_min_delta: 0.001 # 早停最小改善阈值（默认：0.001）
     
     # 梯度裁剪参数
@@ -81,7 +81,7 @@ LOSS:
   bone_loss: False
 
 TrainDataset:
-  dataset_path: '/media/yun/nvme1n1p1/datasets-lidarcap/lidarhuman26M'
+  dataset_path: '/media/yun/66bc2970-1c9c-4d90-a36c-2c7ecd0299d6/datasets/lidarhuman26M'
   use_aug: False
   use_rot: False
   concat_info: False
@@ -110,7 +110,7 @@ TrainDataset:
     - lidarcap_train
   
 TestDataset:
-  dataset_path: "/media/yun/nvme1n1p1/datasets-lidarcap/lidarhuman26M"
+  dataset_path: '/media/yun/66bc2970-1c9c-4d90-a36c-2c7ecd0299d6/datasets/lidarhuman26M'
   use_aug: False
   concat_info: False
   use_rot: False
