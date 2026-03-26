@@ -11,10 +11,11 @@ import glob
 import datetime
 import copy
 import time
-from collections import deque
-
+import threading
+import queue
+ 
 from config import DATASET_DIR
-from datasets.lidarcap_dataset import collate, TemporalDataset
+from datasets.lidarcap_dataset import collate, TemporalDataset, CachedLidarCapDataset
 from modules.geometry import rotation_matrix_to_axis_angle
 from modules.regressor import Regressor
 from modules.loss import Loss
@@ -195,7 +196,135 @@ class MyTrainer(crafter.Trainer):
         output = self.net(inputs)
         return output
 
-class TrainingManager:
+class AsyncCheckpointSaver:
+    """异步检查点保存器，使用后台线程保存权重，避免阻塞训练"""
+    
+    def __init__(self, max_queue_size=5):
+        self.save_queue = queue.Queue(maxsize=max_queue_size)
+        self.worker_thread = None
+        self.running = False
+        self.saved_count = 0
+        self.failed_count = 0
+        self.lock = threading.Lock()
+        
+    def start(self):
+        """启动后台保存线程"""
+        if not self.running:
+            self.running = True
+            self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+            self.worker_thread.start()
+            
+    def stop(self, wait=True):
+        """停止后台保存线程"""
+        self.running = False
+        if wait and self.worker_thread is not None:
+            # 发送结束信号
+            try:
+                self.save_queue.put(None, block=False)
+            except queue.Full:
+                pass
+            self.worker_thread.join(timeout=60)
+            
+    def save_async(self, state_dict, filepath, metadata=None):
+        """异步保存检查点
+        
+        Args:
+            state_dict: 要保存的状态字典
+            filepath: 保存路径
+            metadata: 可选的元数据字典
+        """
+        if not self.running:
+            self.start()
+            
+        # 将张量移到CPU以避免CUDA内存问题
+        cpu_state_dict = {}
+        for key, value in state_dict.items():
+            if isinstance(value, torch.Tensor):
+                cpu_state_dict[key] = value.cpu()
+            else:
+                cpu_state_dict[key] = value
+                
+        save_info = {
+            'state_dict': cpu_state_dict,
+            'filepath': filepath,
+            'metadata': metadata or {}
+        }
+        
+        try:
+            # 如果队列已满，移除最旧的未处理项
+            if self.save_queue.full():
+                try:
+                    old_item = self.save_queue.get_nowait()
+                    logger.warning(f"保存队列已满，丢弃旧的保存请求: {old_item['filepath']}")
+                except queue.Empty:
+                    pass
+                    
+            self.save_queue.put(save_info, block=True, timeout=1)
+        except queue.Full:
+            logger.error(f"无法将检查点加入保存队列: {filepath}")
+            
+    def _worker_loop(self):
+        """后台工作线程主循环"""
+        while self.running:
+            try:
+                save_info = self.save_queue.get(block=True, timeout=0.5)
+                
+                # None 是停止信号
+                if save_info is None:
+                    break
+                    
+                self._do_save(save_info)
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"保存检查点时发生错误: {e}", exc_info=True)
+                with self.lock:
+                    self.failed_count += 1
+                    
+    def _do_save(self, save_info):
+        """执行实际的保存操作"""
+        state_dict = save_info['state_dict']
+        filepath = save_info['filepath']
+        metadata = save_info['metadata']
+        
+        try:
+            # 创建保存数据
+            save_data = {
+                'state_dict': state_dict,
+                'metadata': metadata
+            }
+            
+            # 使用临时文件进行原子写入
+            temp_path = filepath + '.tmp'
+            torch.save(save_data, temp_path)
+            
+            # 原子重命名
+            if os.path.exists(filepath):
+                os.replace(temp_path, filepath)
+            else:
+                os.rename(temp_path, filepath)
+                
+            logger.info(f"异步保存检查点完成: {filepath}")
+            
+            with self.lock:
+                self.saved_count += 1
+                
+        except Exception as e:
+            logger.error(f"保存检查点失败 {filepath}: {e}", exc_info=True)
+            with self.lock:
+                self.failed_count += 1
+                
+    def get_stats(self):
+        """获取保存统计信息"""
+        with self.lock:
+            return {
+                'saved_count': self.saved_count,
+                'failed_count': self.failed_count,
+                'queue_size': self.save_queue.qsize()
+            }
+
+class TrainingProgressTracker:
     def __init__(self, model_dir, logger):
         self.model_dir = model_dir
         self.logger = logger
@@ -379,12 +508,6 @@ if __name__ == '__main__':
     parser.add_argument("--dataset", type=str, required=True)
     # debug
     parser.add_argument('--debug', action='store_true', help='For debug mode')
-    # eval or visual
-    parser.add_argument('--eval', default=False, action='store_true',
-                        help='evaluation the trained model')
-
-    parser.add_argument('--visual', default=False, action='store_true',
-                        help='visualization the result ply')
 
     # extra things, ignored
     parser.add_argument('--ckpt_path', type=str, default=None,
@@ -397,6 +520,8 @@ if __name__ == '__main__':
     # resume training
     parser.add_argument('--resume', type=str, default=None,
                         help='path to the run directory to resume training from (e.g., output/run_1234567890)')
+    parser.add_argument('--preload', action='store_true',
+                        help='preload dataset to memory for faster reading (requires more RAM)')
     
 
     args = parser.parse_args()
@@ -446,7 +571,7 @@ if __name__ == '__main__':
     lr = cfg.TRAIN.GEN.get('LR', 0.0001)
     lr_patience = cfg.TRAIN.GEN.get('patience', 5)
     lr_factor = cfg.TRAIN.GEN.get('factor', 0.5)
-    lr_min = cfg.TRAIN.GEN.get('min_lr', 1e-7)
+    lr_min = float(cfg.TRAIN.GEN.get('min_lr', 1e-7))
     lr_threshold = cfg.TRAIN.GEN.get('threshold', 0.001)
     
     early_stopping_patience = cfg.TRAIN.GEN.get('early_stopping', 15)
@@ -462,21 +587,26 @@ if __name__ == '__main__':
     keep_checkpoints = cfg.TRAIN.GEN.get('keep_checkpoints', 5)
     
     # Load training and validation data
-    if args.eval:
-        test_dataset = TemporalDataset(cfg.TestDataset)
-        test_loader = torch.utils.data.DataLoader(
-            test_dataset, batch_size=args.eval_bs, num_workers=args.threads, pin_memory=True, collate_fn=collate)
-        loader = {'Test': test_loader}
-
+    if args.preload:
+        print("[INFO] Using CachedLidarCapDataset with preload=True for faster data loading")
+        train_dataset = CachedLidarCapDataset(cfg=cfg.TrainDataset, dataset=dataset_name, train=True, preload=True)
     else:
         train_dataset = TemporalDataset(cfg=cfg.TrainDataset, dataset=dataset_name, train=True)
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=args.bs, shuffle=True, num_workers=args.threads, pin_memory=True, collate_fn=collate)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=args.bs, shuffle=True, num_workers=args.threads, pin_memory=True, collate_fn=collate)
+    if args.preload:
+        valid_dataset = CachedLidarCapDataset(cfg=cfg.TestDataset, dataset=dataset_name, train=False, preload=True)
+    else:
         valid_dataset = TemporalDataset(cfg=cfg.TestDataset, dataset=dataset_name, train=False)
-        valid_loader = torch.utils.data.DataLoader(
-            valid_dataset, batch_size=args.eval_bs, shuffle=False, num_workers=args.threads, pin_memory=True, collate_fn=collate)
-        loader = {'Train': train_loader, 'Valid': valid_loader}
+    valid_loader = torch.utils.data.DataLoader(
+        valid_dataset, batch_size=args.eval_bs, shuffle=False, num_workers=args.threads, pin_memory=True, collate_fn=collate)
+    loader = {'Train': train_loader, 'Valid': valid_loader}
 
+    # Initialize async checkpoint saver for non-blocking model saves
+    logger.info("[INFO] Initializing AsyncCheckpointSaver for non-blocking model saves")
+    async_saver = AsyncCheckpointSaver(max_queue_size=10)
+    async_saver.start()
+    
     net = Regressor()
     loss = Loss()
 
@@ -523,7 +653,7 @@ if __name__ == '__main__':
         logger.info(f"梯度裁剪: max_norm={grad_clip}")
     
     # Initialize training manager
-    training_manager = TrainingManager(model_dir, logger)
+    training_manager = TrainingProgressTracker(model_dir, logger)
     
     # Initialize training variables
     start_epoch = 1
@@ -547,6 +677,10 @@ if __name__ == '__main__':
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             
+            # 修复：确保scheduler的min_lrs是float类型而不是str
+            for i in range(len(scheduler.min_lrs)):
+                scheduler.min_lrs[i] = float(scheduler.min_lrs[i])
+            
             start_epoch = checkpoint['epoch'] + 1
             mintloss = checkpoint['mintloss']
             minvloss = checkpoint['minvloss']
@@ -564,7 +698,7 @@ if __name__ == '__main__':
                              use_amp=use_amp, grad_clip=grad_clip)
             if iscuda:
                 train = train.cuda()
-                
+    
     elif args.ckpt_path is not None:
         logger.info(f"Loading checkpoint from {args.ckpt_path}")
         save_model = torch.load(args.ckpt_path)['state_dict']
@@ -585,44 +719,13 @@ if __name__ == '__main__':
                          use_amp=use_amp, grad_clip=grad_clip)
         if iscuda:
             train = train.cuda()
-
-    if args.eval:
+         
+    # Training loop - execute for all modes (new, resume, or ckpt_path)
+    if args.ckpt_path is not None:
         logger.info("=== EVALUATION MODE ===")
-        if args.visual:
-            visual_dir = os.path.join('visual', run_id, dataset_name)
-            os.makedirs(visual_dir, exist_ok=True)
-            logger.info(f"Saving visualizations to {visual_dir}")
-            final_loss, pred_rotmats, pred_vertices = train(
-                epoch=1, train=False, test=True, visual=True)
-            n = len(pred_vertices)
-            filenames = [os.path.join(
-                visual_dir, '{}.ply'.format(i + 1)) for i in range(n)]
-            multiprocess.multi_func(save_smpl_ply, 32, len(
-                pred_vertices), 'saving ply', False, pred_vertices, filenames)
-            logger.info(f"Visualization files saved to {visual_dir}")
-
-        else:
-            final_loss, pred_rotmats = train(
-                epoch=1, train=False, visual=False, test=True)
-        
-        logger.info(f'EVAL LOSS: {final_loss["loss"]}')
-
-        pred_poses = []
-        for pred_rotmat in tqdm(pred_rotmats):
-            pred_poses.append(rotation_matrix_to_axis_angle(torch.from_numpy(pred_rotmat.reshape(-1, 3, 3))).numpy().reshape((-1, 72)))
-        pred_poses = np.stack(pred_poses)
-
-        test_dataset_filename = os.path.join(
-            DATASET_DIR, '{}_test.hdf5'.format(dataset_name))
-        test_data = h5py.File(test_dataset_filename, 'r')
-        gt_poses = test_data['pose'][:]
-        
-        logger.info("Computing evaluation metrics...")
-        metric.output_metric(pred_poses.reshape(-1, 72), gt_poses.reshape(-1, 72))
-        logger.info("Evaluation completed")
-
+        logger.info(f"Model loaded from {args.ckpt_path}")
+        logger.info("Use evaluation script instead")
     else:
-        # Training loop
         logger.info("=== TRAINING MODE ===")
         logger.info(f"Starting training from epoch {start_epoch} to {args.epochs}")
         logger.info(f"Model directory: {model_dir}")
@@ -673,14 +776,14 @@ if __name__ == '__main__':
                 if train_loss_dict['loss'] <= mintloss:
                     mintloss = train_loss_dict['loss']
                     best_save = os.path.join(model_dir, 'best-train-loss.pth')
-                    torch.save({'state_dict': net.state_dict()}, best_save)
-                    logger.info(f"NEW BEST TRAIN LOSS! Saving model at epoch {epoch} (loss: {mintloss:.6f})")
+                    async_saver.save_async(net.state_dict(), best_save, metadata={'epoch': epoch, 'loss': mintloss, 'type': 'best_train'})
+                    logger.info(f"NEW BEST TRAIN LOSS! Queuing async save at epoch {epoch} (loss: {mintloss:.6f})")
                     
                 if val_loss_dict['loss'] <= minvloss:
                     minvloss = val_loss_dict['loss']
                     best_save = os.path.join(model_dir, 'best-valid-loss.pth')
-                    torch.save({'state_dict': net.state_dict()}, best_save)
-                    logger.info(f"NEW BEST VALIDATION LOSS! Saving model at epoch {epoch} (loss: {minvloss:.6f})")
+                    async_saver.save_async(net.state_dict(), best_save, metadata={'epoch': epoch, 'loss': minvloss, 'type': 'best_valid'})
+                    logger.info(f"NEW BEST VALIDATION LOSS! Queuing async save at epoch {epoch} (loss: {minvloss:.6f})")
 
                 # 学习率调度器（不在预热期间使用）
                 if warmup_scheduler is None or epoch > warmup_scheduler.warmup_epochs:
@@ -701,7 +804,7 @@ if __name__ == '__main__':
                 
                 # Save progress after each epoch (or every N epochs)
                 if epoch % save_every == 0:
-                    training_manager.save_progress_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
+                    training_manager.save_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
                 
                 # 定期清理旧检查点
                 if epoch % 10 == 0:
@@ -724,7 +827,12 @@ if __name__ == '__main__':
             except:
                 pass
             raise
-            
+        finally:
+            # Stop async saver to ensure all saves complete
+            logger.info("[INFO] Stopping async checkpoint saver...")
+            async_saver.stop(wait=True)
+            logger.info("[INFO] Async checkpoint saver stopped.")
+             
         logger.info("=== TRAINING SUMMARY ===")
         logger.info(f"Training completed at epoch {epoch}")
         logger.info(f"Best train loss: {mintloss:.6f}")

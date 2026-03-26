@@ -26,13 +26,13 @@ GPU="0"
 BS=4
 
 # 评估批次大小
-EVAL_BS=1
+EVAL_BS=4
 
 # 线程数
 THREADS=6
 
 # 训练轮数
-EPOCHS=200
+EPOCHS=600
 
 # 输出目录
 OUTPUT_DIR="/media/yun/nfs_giga/lidarcap_output"
@@ -44,17 +44,14 @@ LOG_INTERVAL=100
 # 调试模式（true/false）
 DEBUG="false"
 
-# 评估模式（true/false）
-EVAL_MODE="false"
-
-# 可视化模式（true/false）
-VISUAL="false"
-
 # 恢复训练路径（留空表示新建训练）
-RESUME_PATH=""
+RESUME_PATH="/media/yun/nfs_giga/lidarcap_output/run_202603151738"
 
 # 检查点路径（用于评估/可视化，留空则自动选择）
 CKPT_PATH=""
+
+# 内存预加载（true/false）- 将数据集加载到内存以加快读取速度（需要更多RAM）
+PRELOAD="true"
 
 # ============================================================================
 # 🚀 启动训练
@@ -79,14 +76,6 @@ if [ "$DEBUG" = "true" ]; then
     CMD="$CMD --debug"
 fi
 
-if [ "$EVAL_MODE" = "true" ]; then
-    CMD="$CMD --eval"
-fi
-
-if [ "$VISUAL" = "true" ]; then
-    CMD="$CMD --visual"
-fi
-
 # 恢复训练
 if [ -n "$RESUME_PATH" ]; then
     CMD="$CMD --resume $RESUME_PATH"
@@ -95,6 +84,11 @@ fi
 # 检查点路径
 if [ -n "$CKPT_PATH" ]; then
     CMD="$CMD --ckpt_path $CKPT_PATH"
+fi
+
+# 内存预加载
+if [ "$PRELOAD" = "true" ]; then
+    CMD="$CMD --preload"
 fi
 
 # ============================================================================
@@ -112,11 +106,10 @@ echo "  评估批次大小: $EVAL_BS"
 echo "  线程数: $THREADS"
 echo "  训练轮数: $EPOCHS"
 echo "  输出目录: $OUTPUT_DIR"
+echo "  内存预加载: $PRELOAD"
 echo ""
 echo "运行模式："
 echo "  调试: $DEBUG"
-echo "  评估: $EVAL_MODE"
-echo "  可视化: $VISUAL"
 if [ -n "$RESUME_PATH" ]; then
     echo "  恢复路径: $RESUME_PATH"
 fi
