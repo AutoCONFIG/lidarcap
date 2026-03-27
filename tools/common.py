@@ -66,7 +66,7 @@ def login():
     local_server = {
         'WANDB_BASE_URL': '',
         'WANDB_ENTITY': '',
-        'WANDB_API_KEY': 'fd4c32eda786a119fd8136724275db37001c6cee',
+        'WANDB_API_KEY': '',
     }
     for k, v in local_server.items():
         os.environ[k] = v

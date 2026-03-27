@@ -6,8 +6,6 @@ from timm.models.layers import DropPath,trunc_normal_
 from .dgcnn_group import DGCNN_Grouper
 from logger import *
 import numpy as np
-# from knn_cuda import KNN
-# knn = KNN(k=8, transpose_mode=False)
 
 def knn_point(nsample, xyz, new_xyz):
     """
@@ -45,25 +43,21 @@ def square_distance(src, dst):
 
 def get_knn_index(coor_q, coor_k=None):
     coor_k = coor_k if coor_k is not None else coor_q
-    # coor: bs, 3, np
     batch_size, _, num_points = coor_q.size()
     num_points_k = coor_k.size(2)
 
     with torch.no_grad():
-#         _, idx = knn(coor_k, coor_q)  # bs k np
-        idx = knn_point(8, coor_k.transpose(-1, -2).contiguous(), coor_q.transpose(-1, -2).contiguous()) # B G M
+        idx = knn_point(8, coor_k.transpose(-1, -2).contiguous(), coor_q.transpose(-1, -2).contiguous())
         idx = idx.transpose(-1, -2).contiguous()
         idx_base = torch.arange(0, batch_size, device=coor_q.device).view(-1, 1, 1) * num_points_k
         idx = idx + idx_base
         idx = idx.view(-1)
     
-    return idx  # bs*k*np
+    return idx
 
 def get_graph_feature(x, knn_index, x_q=None):
-
-        #x: bs, np, c, knn_index: bs*k*np
-        k = 8
-        batch_size, num_points, num_dims = x.size()
+    k = 8
+    batch_size, num_points, num_dims = x.size()
         num_query = x_q.size(1) if x_q is not None else num_points
         feature = x.view(batch_size * num_points, num_dims)[knn_index, :]
         feature = feature.view(batch_size, k, num_query, num_dims)
@@ -283,15 +277,7 @@ class PCTransformer(nn.Module):
             nn.LeakyReLU(negative_slope=0.2),
             nn.Conv1d(128, embed_dim, 1)
         )
-        # self.pos_embed_wave = nn.Sequential(
-        #     nn.Conv1d(60, 128, 1),
-        #     nn.BatchNorm1d(128),
-        #     nn.LeakyReLU(negative_slope=0.2),
-        #     nn.Conv1d(128, embed_dim, 1)
-        # )
 
-        # self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        # self.cls_pos = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.input_proj = nn.Sequential(
             nn.Conv1d(128, embed_dim, 1),
             nn.BatchNorm1d(embed_dim),
@@ -304,12 +290,6 @@ class PCTransformer(nn.Module):
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate)
             for i in range(depth[0])])
-
-        # self.increase_dim = nn.Sequential(
-        #     nn.Linear(embed_dim,1024),
-        #     nn.ReLU(inplace=True),
-        #     nn.Linear(1024, 1024)
-        # )
 
         self.increase_dim = nn.Sequential(
             nn.Conv1d(embed_dim, 1024, 1),
@@ -326,10 +306,8 @@ class PCTransformer(nn.Module):
         )
         self.mlp_query = nn.Sequential(
             nn.Conv1d(1024 + 3, 1024, 1),
-            # nn.BatchNorm1d(1024),
             nn.LeakyReLU(negative_slope=0.2),
             nn.Conv1d(1024, 1024, 1),
-            # nn.BatchNorm1d(1024),
             nn.LeakyReLU(negative_slope=0.2),
             nn.Conv1d(1024, embed_dim, 1)
         )
@@ -340,8 +318,6 @@ class PCTransformer(nn.Module):
                 drop=drop_rate, attn_drop=attn_drop_rate)
             for i in range(depth[1])])
 
-        # trunc_normal_(self.cls_token, std=.02)
-        # trunc_normal_(self.cls_pos, std=.02)
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -359,44 +335,27 @@ class PCTransformer(nn.Module):
             nn.init.constant_(m.bias.data, 0)
 
     def pos_encoding_sin_wave(self, coor):
-        # ref to https://arxiv.org/pdf/2003.08934v2.pdf
-        D = 64 #
-        # normal the coor into [-1, 1], batch wise
+        D = 64
         normal_coor = 2 * ((coor - coor.min()) / (coor.max() - coor.min())) - 1 
 
-        # define sin wave freq
-        freqs = torch.arange(D, dtype=torch.float).cuda() 
+        freqs = torch.arange(D, dtype=torch.float, device=coor.device)
         freqs = np.pi * (2**freqs)       
 
-        freqs = freqs.view(*[1]*len(normal_coor.shape), -1) # 1 x 1 x 1 x D
-        normal_coor = normal_coor.unsqueeze(-1) # B x 3 x N x 1
-        k = normal_coor * freqs # B x 3 x N x D
-        s = torch.sin(k) # B x 3 x N x D
-        c = torch.cos(k) # B x 3 x N x D
-        x = torch.cat([s,c], -1) # B x 3 x N x 2D
-        pos = x.transpose(-1,-2).reshape(coor.shape[0], -1, coor.shape[-1]) # B 6D N
-        # zero_pad = torch.zeros(x.size(0), 2, x.size(-1)).cuda()
-        # pos = torch.cat([x, zero_pad], dim = 1)
-        # pos = self.pos_embed_wave(x)
+        freqs = freqs.view(*[1]*len(normal_coor.shape), -1)
+        normal_coor = normal_coor.unsqueeze(-1)
+        k = normal_coor * freqs
+        s = torch.sin(k)
+        c = torch.cos(k)
+        x = torch.cat([s,c], -1)
+        pos = x.transpose(-1,-2).reshape(coor.shape[0], -1, coor.shape[-1])
         return pos
 
     def forward(self, inpc):
-        '''
-            inpc : input incomplete point cloud with shape B N(2048) C(3)
-        '''
-        # build point proxy
         bs = inpc.size(0)
         coor, f = self.grouper(inpc.transpose(1,2).contiguous()) 
         knn_index = get_knn_index(coor)
-        # NOTE: try to use a sin wave  coor B 3 N, change the pos_embed input dim
-        # pos = self.pos_encoding_sin_wave(coor).transpose(1,2)
         pos =  self.pos_embed(coor).transpose(1,2)
         x = self.input_proj(f).transpose(1,2)
-        # cls_pos = self.cls_pos.expand(bs, -1, -1)
-        # cls_token = self.cls_pos.expand(bs, -1, -1)
-        # x = torch.cat([cls_token, x], dim=1)
-        # pos = torch.cat([cls_pos, pos], dim=1)
-        # encoder
         for i, blk in enumerate(self.encoder):
             if i < self.knn_layer:
                 x = blk(x + pos, knn_index)   # B N C

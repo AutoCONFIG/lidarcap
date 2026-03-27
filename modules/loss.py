@@ -39,7 +39,7 @@ class Loss(nn.Module):
 
             # L_{J_{SMPL}}
             pred_human_vertices = self.smpl(
-                pred_rotmats.reshape(-1, 24, 3, 3), torch.zeros((B * T, 10)).cuda())
+                pred_rotmats.reshape(-1, 24, 3, 3), torch.zeros((B * T, 10), device=gt_pose.device))
             pred_smpl_joints = self.smpl.get_full_joints(
                 pred_human_vertices).reshape(B, T, 24, 3)
             loss_smpl_joints = self.criterion_joints(

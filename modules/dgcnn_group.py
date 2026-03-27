@@ -133,7 +133,7 @@ class DGCNN_Grouper(nn.Module):
         num_points_q = x_q.size(2)
 
         with torch.no_grad():
-        # _, idx = knn(coor_k, coor_q)  # bs k np
+            # _, idx = knn(coor_k, coor_q)  # bs k np
             idx = knn_point(k, coor_k.transpose(-1, -2).contiguous(), coor_q.transpose(-1, -2).contiguous()) # B G M
             idx = idx.transpose(-1, -2).contiguous()
             assert idx.shape[1] == k

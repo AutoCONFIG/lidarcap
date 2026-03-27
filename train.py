@@ -255,13 +255,13 @@ class AsyncCheckpointSaver:
             if self.save_queue.full():
                 try:
                     old_item = self.save_queue.get_nowait()
-                    logger.warning(f"保存队列已满，丢弃旧的保存请求: {old_item['filepath']}")
+                    logging.warning(f"保存队列已满，丢弃旧的保存请求: {old_item['filepath']}")
                 except queue.Empty:
                     pass
                     
             self.save_queue.put(save_info, block=True, timeout=1)
         except queue.Full:
-            logger.error(f"无法将检查点加入保存队列: {filepath}")
+            logging.error(f"无法将检查点加入保存队列: {filepath}")
             
     def _worker_loop(self):
         """后台工作线程主循环"""
@@ -278,7 +278,7 @@ class AsyncCheckpointSaver:
             except queue.Empty:
                 continue
             except Exception as e:
-                logger.error(f"保存检查点时发生错误: {e}", exc_info=True)
+                logging.error(f"保存检查点时发生错误: {e}", exc_info=True)
                 with self.lock:
                     self.failed_count += 1
                     
@@ -305,13 +305,13 @@ class AsyncCheckpointSaver:
             else:
                 os.rename(temp_path, filepath)
                 
-            logger.info(f"异步保存检查点完成: {filepath}")
+            logging.info(f"异步保存检查点完成: {filepath}")
             
             with self.lock:
                 self.saved_count += 1
                 
         except Exception as e:
-            logger.error(f"保存检查点失败 {filepath}: {e}", exc_info=True)
+            logging.error(f"保存检查点失败 {filepath}: {e}", exc_info=True)
             with self.lock:
                 self.failed_count += 1
                 
@@ -386,7 +386,7 @@ class TrainingProgressTracker:
                 self.logger.warning("Checkpoint file not found, starting from scratch")
                 return None
                 
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location='cpu' if not iscuda else None)
         self.logger.info(f"Loaded checkpoint from epoch {checkpoint['epoch']}")
         return checkpoint
         
@@ -701,7 +701,7 @@ if __name__ == '__main__':
     
     elif args.ckpt_path is not None:
         logger.info(f"Loading checkpoint from {args.ckpt_path}")
-        save_model = torch.load(args.ckpt_path)['state_dict']
+        save_model = torch.load(args.ckpt_path, map_location='cpu' if not iscuda else None)['state_dict']
         model_dict = net.state_dict()
         state_dict = {k: v for k, v in save_model.items()
                       if k in model_dict.keys()}
