@@ -33,7 +33,7 @@ TRAIN:
     min_lr: 1e-7                  # 最小学习率（默认：1e-7）
     
     # 早停机制参数
-    early_stopping: 150             # 早停容忍的epoch数（默认：15，设为0禁用）
+    early_stopping: 30              # 早停容忍的epoch数（默认：15，设为0禁用）
     early_stopping_min_delta: 0.001 # 早停最小改善阈值（默认：0.001）
     
     # 梯度裁剪参数

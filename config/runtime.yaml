@@ -1,0 +1,21 @@
+# 运行时配置
+RUNTIME:
+  # GPU配置
+  gpu_id: 0
+  num_gpus: 1
+  
+  # 输出目录
+  output_dir: './lidarcap_output'
+  
+  # 是否使用内存预加载
+  preload: true
+  
+  # 调试模式
+  debug: false
+  
+  # 恢复训练
+  resume: null
+  checkpoint_path: null
+  
+  # 数据集名称
+  dataset: 'lidarcap'

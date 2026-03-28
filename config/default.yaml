@@ -1,0 +1,6 @@
+# 默认配置 - 加载所有子配置
+defaults:
+  - train
+  - model
+  - dataset
+  - runtime

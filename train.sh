@@ -3,138 +3,31 @@
 set -e
 
 # ============================================================================
-# LidarCap 训练脚本 - 快速启动配置
-# ============================================================================
-# 说明：直接运行 bash train.sh 即可启动训练
-#      在下方配置区域修改参数即可
-#      训练策略参数（学习率、早停、梯度裁剪等）请在 base.yaml 中配置
+# LidarCap 训练脚本 - 从配置文件读取所有参数
 # ============================================================================
 
-# ============================================================================
-# 📋 训练配置区域（修改此处参数）
-# ============================================================================
-
-# ==================== 必需参数 ====================
-# 数据集名称
-DATASET="lidarcap"
-
-# ==================== 基本训练参数 ====================
-# GPU ID (多个GPU用空格分隔，如 "0 1"，-1 表示使用CPU)
-GPU="0"
-
-# 训练批次大小
-BS=4
-
-# 评估批次大小
-EVAL_BS=4
-
-# 线程数
-THREADS=6
-
-# 训练轮数
-EPOCHS=600
-
-# 输出目录
-OUTPUT_DIR="./lidarcap_output"
-
-# 日志间隔
-LOG_INTERVAL=100
-
-# ==================== 模式配置 ====================
-# 调试模式（true/false）
-DEBUG="false"
-
-# 恢复训练路径（留空表示新建训练）
-RESUME_PATH=""
-
-# 检查点路径（用于评估/可视化，留空则自动选择）
-CKPT_PATH=""
-
-# 内存预加载（true/false）- 将数据集加载到内存以加快读取速度（需要更多RAM）
-PRELOAD="true"
-
-# ============================================================================
-# 🚀 启动训练
-# ============================================================================
-
-CMD="python train.py"
-
-# 必需参数
-CMD="$CMD --dataset $DATASET"
-
-# 基本训练参数
-CMD="$CMD --gpu $GPU"
-CMD="$CMD --bs $BS"
-CMD="$CMD --eval_bs $EVAL_BS"
-CMD="$CMD --threads $THREADS"
-CMD="$CMD --epochs $EPOCHS"
-CMD="$CMD --output_dir $OUTPUT_DIR"
-CMD="$CMD --log_interval $LOG_INTERVAL"
-
-# 模式参数
-if [ "$DEBUG" = "true" ]; then
-    CMD="$CMD --debug"
-fi
-
-# 恢复训练
-if [ -n "$RESUME_PATH" ]; then
-    CMD="$CMD --resume $RESUME_PATH"
-fi
-
-# 检查点路径
-if [ -n "$CKPT_PATH" ]; then
-    CMD="$CMD --ckpt_path $CKPT_PATH"
-fi
-
-# 内存预加载
-if [ "$PRELOAD" = "true" ]; then
-    CMD="$CMD --preload"
-fi
-
-# ============================================================================
-# 执行命令
-# ============================================================================
 echo "=========================================="
-echo "🚀 LidarCap 训练启动"
+echo "LidarCap 训练启动"
 echo "=========================================="
 echo ""
-echo "配置信息："
-echo "  数据集: $DATASET"
-echo "  GPU: $GPU"
-echo "  批次大小: $BS"
-echo "  评估批次大小: $EVAL_BS"
-echo "  线程数: $THREADS"
-echo "  训练轮数: $EPOCHS"
-echo "  输出目录: $OUTPUT_DIR"
-echo "  内存预加载: $PRELOAD"
-echo ""
-echo "运行模式："
-echo "  调试: $DEBUG"
-if [ -n "$RESUME_PATH" ]; then
-    echo "  恢复路径: $RESUME_PATH"
-fi
-if [ -n "$CKPT_PATH" ]; then
-    echo "  检查点: $CKPT_PATH"
-fi
-echo ""
-echo "=========================================="
-echo ""
-echo "执行命令："
-echo "$CMD"
-echo ""
-echo "=========================================="
+echo "配置文件: config/"
+echo "  - train.yaml   (训练超参数)"
+echo "  - model.yaml   (模型配置)"
+echo "  - dataset.yaml (数据集配置)"
+echo "  - runtime.yaml (运行时配置)"
 echo ""
 
-eval $CMD
+# 执行训练（所有参数从配置文件读取）
+python train.py --config-dir config
 
 EXIT_CODE=$?
 
 echo ""
 echo "=========================================="
 if [ $EXIT_CODE -eq 0 ]; then
-    echo "✅ 训练完成！"
+    echo "训练完成!"
 else
-    echo "❌ 训练失败，退出码: $EXIT_CODE"
+    echo "训练失败，退出码: $EXIT_CODE"
 fi
 echo "=========================================="
 

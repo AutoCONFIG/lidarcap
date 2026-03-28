@@ -1,0 +1,60 @@
+# 训练超参数配置
+TRAIN:
+  # 基本训练参数
+  batch_size: 4
+  eval_batch_size: 4
+  num_epochs: 600
+  num_workers: 6
+  
+  # 学习率和优化器参数
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  
+  # 学习率调度器参数（ReduceLROnPlateau）
+  scheduler:
+    factor: 0.5
+    patience: 5
+    threshold: 0.001
+    min_lr: 1.0e-7
+  
+  # 早停机制参数
+  early_stopping:
+    patience: 30
+    min_delta: 0.001
+  
+  # 梯度裁剪参数
+  grad_clip: null
+  
+  # 混合精度训练
+  use_amp: false
+  
+  # 学习率预热参数
+  warmup:
+    epochs: 0
+    min_lr: 1.0e-8
+  
+  # 检查点保存策略
+  checkpoint:
+    save_every: 1
+    keep_checkpoints: 5
+  
+  # 日志配置
+  log_interval: 100
+  
+  # 其他训练选项
+  with_body_label: false
+  segment_parallel: false
+  use_drop_first: true
+  use_denoise: false
+  use_replace_noise: false
+  replace_noise_pc_rate: 0.2
+
+# 损失函数配置
+LOSS:
+  chamfer_loss: false
+  nn_loss: false
+  flow_loss: false
+  end_loss: false
+  pose_loss: true
+  zmp_loss: false
+  bone_loss: false
