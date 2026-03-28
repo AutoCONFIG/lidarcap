@@ -58,13 +58,13 @@ def get_knn_index(coor_q, coor_k=None):
 def get_graph_feature(x, knn_index, x_q=None):
     k = 8
     batch_size, num_points, num_dims = x.size()
-        num_query = x_q.size(1) if x_q is not None else num_points
-        feature = x.view(batch_size * num_points, num_dims)[knn_index, :]
-        feature = feature.view(batch_size, k, num_query, num_dims)
-        x = x_q if x_q is not None else x
-        x = x.view(batch_size, 1, num_query, num_dims).expand(-1, k, -1, -1)
-        feature = torch.cat((feature - x, x), dim=-1)
-        return feature  # b k np c
+    num_query = x_q.size(1) if x_q is not None else num_points
+    feature = x.view(batch_size * num_points, num_dims)[knn_index, :]
+    feature = feature.view(batch_size, k, num_query, num_dims)
+    x = x_q if x_q is not None else x
+    x = x.view(batch_size, 1, num_query, num_dims).expand(-1, k, -1, -1)
+    feature = torch.cat((feature - x, x), dim=-1)
+    return feature  # b k np c
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
