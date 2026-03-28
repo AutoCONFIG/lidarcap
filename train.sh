@@ -35,7 +35,7 @@ THREADS=6
 EPOCHS=600
 
 # 输出目录
-OUTPUT_DIR="/media/yun/nfs_giga/lidarcap_output"
+OUTPUT_DIR="./lidarcap_output"
 
 # 日志间隔
 LOG_INTERVAL=100
