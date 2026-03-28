@@ -5,7 +5,6 @@ forward: using pose and beta calculate vertex location
 function get joints: calculate joints from vertex location
 """
 import config as cfg
-import cv2
 import numpy as np
 import pickle
 import torch
@@ -171,7 +170,7 @@ colors = {
 
 class SMPLRenderer(object):
     def __init__(self,
-                 face_path="../data/smpl_faces.npy"):
+                 face_path=cfg.SMPL_FACES_FILE):
         self.faces = np.load(face_path)
 
     def __call__(self,

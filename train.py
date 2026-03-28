@@ -370,7 +370,7 @@ class TrainingProgressTracker:
             
         self.logger.info(f"Progress saved at epoch {epoch}")
         
-    def load_progress(self):
+    def load_progress(self, iscuda):
         """Load training progress"""
         if not os.path.exists(self.progress_file):
             return None
@@ -609,6 +609,10 @@ if __name__ == '__main__':
     
     net = Regressor()
     loss = Loss()
+    
+    temporal_loss_config = cfg.get('TEMPORAL_LOSS', {})
+    temporal_weight = temporal_loss_config.get('weight', 0.1)
+    loss.temporal_weight = temporal_weight
 
     # Define optimizer with improved parameters
     optimizer = torch.optim.Adam([p for p in net.parameters() if p.requires_grad],
@@ -662,7 +666,7 @@ if __name__ == '__main__':
     
     # Load checkpoint if resuming or if ckpt_path is provided
     if args.resume:
-        checkpoint = training_manager.load_progress()
+        checkpoint = training_manager.load_progress(iscuda)
         if checkpoint:
             # Load model state
             net.load_state_dict(checkpoint['model_state_dict'])
@@ -824,8 +828,8 @@ if __name__ == '__main__':
             # Save progress even if training fails
             try:
                 training_manager.save_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
-            except:
-                pass
+            except Exception as save_error:
+                logger.error(f"Failed to save progress during error: {save_error}", exc_info=True)
             raise
         finally:
             # Stop async saver to ensure all saves complete

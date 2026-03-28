@@ -38,14 +38,13 @@ class TemporalConsistencyLoss(nn.Module):
     def forward(self, joints):
         loss_dict = {}
         
-        if joints.size(1) >= 2:
-            velocity = joints[:, 1:] - joints[:, :-1]
-            if velocity.size(1) >= 2:
-                velocity_diff = velocity[:, 1:] - velocity[:, :-1]
-                loss_dict['loss_velocity'] = torch.mean(velocity_diff ** 2) * self.velocity_weight
+        velocity = joints[:, 1:] - joints[:, :-1]
+        
+        if velocity.size(1) >= 2:
+            velocity_diff = velocity[:, 1:] - velocity[:, :-1]
+            loss_dict['loss_velocity'] = torch.mean(velocity_diff ** 2) * self.velocity_weight
         
         if joints.size(1) >= 3:
-            velocity = joints[:, 1:] - joints[:, :-1]
             acceleration = velocity[:, 1:] - velocity[:, :-1]
             if acceleration.size(1) >= 2:
                 accel_diff = acceleration[:, 1:] - acceleration[:, :-1]
@@ -60,8 +59,11 @@ class TemporalConsistencyLoss(nn.Module):
                 bone_loss += torch.var(bone_lengths, dim=1).mean()
             loss_dict['loss_bone'] = bone_loss * self.bone_length_weight
         
-        total = sum(loss_dict.values())
-        loss_dict['loss_temporal'] = total
+        if len(loss_dict) > 0:
+            total = sum(loss_dict.values())
+            loss_dict['loss_temporal'] = total
+        else:
+            loss_dict['loss_temporal'] = torch.tensor(0.0, device=joints.device)
         
         return loss_dict
 

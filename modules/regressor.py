@@ -122,23 +122,6 @@ class PointNet2Encoder(nn.Module):
         features = features.squeeze(-1).reshape(B, T, -1)
         return features
 
-
-class RNN(nn.Module):
-    def __init__(self, n_input, n_output, n_hidden, n_rnn_layer=2):
-        super(RNN, self).__init__()
-        self.rnn = nn.GRU(n_hidden, n_hidden, n_rnn_layer,
-                          batch_first=True, bidirectional=True)
-        self.linear1 = nn.Linear(n_input, n_hidden)
-
-        self.linear2 = nn.Linear(n_hidden * 2, n_output)
-
-        self.dropout = nn.Dropout()
-
-    def forward(self, x):  # (B, T, D)
-        x = self.rnn(F.relu(self.dropout(self.linear1(x)), inplace=True))[0]
-        return self.linear2(x)
-
-
 class Regressor(nn.Module):
     def __init__(self):
         super().__init__()
@@ -169,8 +152,8 @@ class Regressor(nn.Module):
         orig_feat = self.encoder(data)  # (B, T, 1024)
         recon_feat = recon_point_feat.mean(dim=2)  # (B, T, 384)
 
-        # 3. 融合两个点云特征作为 GRU 输入
-        x = torch.cat([orig_feat, recon_feat], dim=-1)  # (B, T, 1024 + 256)
+        # 3. 融合两个点云特征作为 Mamba 输入
+        x = torch.cat([orig_feat, recon_feat], dim=-1)  # (B, T, 1024 + 384)
 
         # 4. 回归关节点
         B, T, _ = x.shape

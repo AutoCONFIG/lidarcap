@@ -77,7 +77,8 @@ class Trainer(Crafter):
             rotmats = []
             vertices = []
             from modules.smpl import SMPL, get_smpl_vertices
-            smpl = SMPL().cuda()
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            smpl = SMPL().to(device)
             for bi, inputs in enumerate(bar):
                 inputs = self.todevice(inputs)
                 output = self.forward_net(inputs)

@@ -1,4 +1,4 @@
-from datasets.lidarcap_dataset import (
+from .lidarcap_dataset import (
     TemporalDataset,
     CachedLidarCapDataset,
     collate,

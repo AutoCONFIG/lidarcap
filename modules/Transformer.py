@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 
-from timm.models.layers import DropPath,trunc_normal_
+from timm.models.layers import DropPath, trunc_normal_
 
 from .dgcnn_group import DGCNN_Grouper
-from logger import *
+from .logger import get_root_logger, get_logger, print_log
 import numpy as np
 
 def knn_point(nsample, xyz, new_xyz):

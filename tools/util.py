@@ -11,8 +11,8 @@ import numpy as np
 import pickle
 import torch
 
-data_folder = '/data'
-lidarcap_dataset_folder = '/data/lidarcap'
+data_folder = 'data'
+lidarcap_dataset_folder = 'data/lidarcap'
 
 
 
@@ -59,7 +59,8 @@ def poses_to_vertices(poses, trans=None):
     vertices = []
 
     n = len(poses)
-    smpl = SMPL().cuda()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    smpl = SMPL().to(device)
     batch_size = 128
     n_batch = (n + batch_size - 1) // batch_size
 
@@ -69,7 +70,7 @@ def poses_to_vertices(poses, trans=None):
 
         cur_n = min(ub - lb, n - lb)
         cur_vertices = smpl(torch.from_numpy(
-            poses[lb:ub]).cuda(), torch.zeros((cur_n, 10)).cuda())
+            poses[lb:ub]).to(device), torch.zeros((cur_n, 10)).to(device))
         vertices.append(cur_vertices.cpu().numpy())
 
     vertices = np.concatenate(vertices, axis=0)
@@ -85,7 +86,7 @@ def save_smpl_ply(vertices, filename):
     if vertices.ndim == 3:
         assert vertices.shape[0] == 1
         vertices = vertices.squeeze(0)
-    model_file = '/gemini/code/LiDARCap/data/basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
+    model_file = 'data/basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
     with open(model_file, 'rb') as f:
         smpl_model = pickle.load(f, encoding='iso-8859-1')
         face_index = smpl_model['f'].astype(np.int64)
@@ -117,7 +118,8 @@ def poses_to_joints(poses):
     joints = []
 
     n = len(poses)
-    smpl = SMPL().cuda()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    smpl = SMPL().to(device)
     batch_size = 128
     n_batch = (n + batch_size - 1) // batch_size
 
@@ -127,7 +129,7 @@ def poses_to_joints(poses):
 
         cur_n = min(ub - lb, n - lb)
         cur_vertices = smpl(torch.from_numpy(
-            poses[lb:ub]).cuda(), torch.zeros((cur_n, 10)).cuda())
+            poses[lb:ub]).to(device), torch.zeros((cur_n, 10)).to(device))
         cur_joints = smpl.get_full_joints(cur_vertices)
         joints.append(cur_joints.cpu().numpy())
     joints = np.concatenate(joints, axis=0)

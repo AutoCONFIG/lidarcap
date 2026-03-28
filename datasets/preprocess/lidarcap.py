@@ -9,16 +9,17 @@ import re
 import sys
 import h5py
 import torch
+import config
 
 sys.path.append(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
 from tools import multiprocess
 from modules.smpl import SMPL
 
-smpl = SMPL().cuda()
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+smpl = SMPL().to(device)
 
-
-ROOT_PATH = '/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M'
+ROOT_PATH = config.DATASET_DIR
 MAX_PROCESS_COUNT = 64
 
 # img_filenames = []
@@ -32,8 +33,7 @@ def read_ply(filename):
 
 
 def save_ply(filename, points):
-    points = [(points[i, 0], points[i, 1], points[i, 2])
-              for i in range(points.shape[0])]
+    points = [(points[i, 0], points[i, 1], points[i, 2]) for i in range(points.shape[0])]
     vertex = np.array(points, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
     el = PlyElement.describe(vertex, 'vertex', comments=['vertices'])
     PlyData([el], text=False).write(filename)
@@ -128,7 +128,7 @@ def foo(id, args):
 
         np_pose = np.stack([cur_poses[i]])
         full_joints.append(smpl.get_full_joints(smpl(torch.from_numpy(
-            np_pose).cuda(), torch.zeros((1, 10)).cuda())).cpu().numpy()[0])
+            np_pose).to(device), torch.zeros((1, 10)).to(device))).cpu().numpy()[0])
 
     return np.array(poses), np.array(betas), np.array(trans), np.array(point_clouds), np.array(points_nums), cur_depths, np.array(full_joints)
 
@@ -141,7 +141,7 @@ def get_sorted_ids(s):
     if re.match(r'^([1-9]\d*)-([1-9]\d*)$', s):
         start_index, end_index = s.split('-')
         indexes = list(range(int(start_index), int(end_index) + 1))
-    elif re.match(r'^(([1-9]\d*),)*([1-9]\d*)$', s):
+    elif re.match(r'^(([0-9]\d*),)*([0-9]\d*)$', s):
         indexes = [int(x) for x in s.split(',')]
     return sorted(indexes)
 
@@ -179,7 +179,7 @@ def dump(args):
             (whole_full_joints, full_joints))
 
     whole_filename = args.name + '.hdf5'
-    with h5py.File(os.path.join(extras_path, whole_filename), 'w') as f:
+    with h5py.File(os.path.join(ROOT_PATH, whole_filename), 'w') as f:
         f.create_dataset('pose', data=whole_poses)
         f.create_dataset('shape', data=whole_betas)
         f.create_dataset('trans', data=whole_trans)
@@ -191,7 +191,7 @@ def dump(args):
 
 
 if __name__ == '__main__':
-    extras_path = '/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M'
+    extras_path = config.DATASET_DIR
     os.makedirs(extras_path, exist_ok=True)
 
     parser = argparse.ArgumentParser()

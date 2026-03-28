@@ -9,8 +9,10 @@ ROOT_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
 DATASET_DIR = "/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M"
 SMPL_FILE = os.path.join(DATA_DIR, 'basicModel_neutral_lbs_10_207_0_v1.0.0.pkl')
-# seems all zeros.
+SMPL_FACES_FILE = os.path.join(DATA_DIR, 'smpl_faces.npy')
 JOINT_REGRESSOR_TRAIN_EXTRA = os.path.join(DATA_DIR, 'J_regressor_extra.npy')
+
+DATASET_CACHE_DIR = os.path.join(DATA_DIR, 'dataset_cache')
 
 """
 Each dataset uses different sets of joints.
