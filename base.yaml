@@ -102,7 +102,7 @@ LOSS:
   bone_loss: False
 
 TrainDataset:
-  dataset_path: '/media/yun/66bc2970-1c9c-4d90-a36c-2c7ecd0299d6/datasets/lidarhuman26M/lidarcap_train.hdf5'
+  dataset_path: '/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M/lidarcap_train.hdf5'
   use_aug: False
   use_rot: False
   concat_info: False
@@ -131,7 +131,7 @@ TrainDataset:
     - lidarcap_train
   
 TestDataset:
-  dataset_path: '/media/yun/66bc2970-1c9c-4d90-a36c-2c7ecd0299d6/datasets/lidarhuman26M/lidarcap_test.hdf5'
+  dataset_path: '/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M/lidarcap_test.hdf5'
   use_aug: False
   concat_info: False
   use_rot: False
