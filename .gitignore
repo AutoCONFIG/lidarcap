@@ -7,4 +7,5 @@ build/
 *.egg-info/
 *.egg
 .vscode/
+.kilo/
 .ipynb_checkpoints/
