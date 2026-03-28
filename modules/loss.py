@@ -12,14 +12,70 @@ def batch_pc_normalize(pc):
     return pc / pc.norm(dim=-1, keepdim=True).max(1, True)[0]
 
 
+class TemporalConsistencyLoss(nn.Module):
+    def __init__(
+        self,
+        velocity_weight=1.0,
+        acceleration_weight=0.5,
+        bone_length_weight=0.3
+    ):
+        super().__init__()
+        self.velocity_weight = velocity_weight
+        self.acceleration_weight = acceleration_weight
+        self.bone_length_weight = bone_length_weight
+        
+        self.skeleton_pairs = [
+            (0, 1), (0, 2), (0, 3),
+            (1, 4), (2, 5), (3, 6),
+            (4, 7), (5, 8), (6, 9),
+            (7, 10), (8, 11), (9, 12),
+            (0, 13), (0, 16),
+            (13, 14), (14, 15),
+            (16, 17), (17, 18),
+            (15, 19), (15, 20), (18, 21), (18, 22)
+        ]
+    
+    def forward(self, joints):
+        loss_dict = {}
+        
+        if joints.size(1) >= 2:
+            velocity = joints[:, 1:] - joints[:, :-1]
+            if velocity.size(1) >= 2:
+                velocity_diff = velocity[:, 1:] - velocity[:, :-1]
+                loss_dict['loss_velocity'] = torch.mean(velocity_diff ** 2) * self.velocity_weight
+        
+        if joints.size(1) >= 3:
+            velocity = joints[:, 1:] - joints[:, :-1]
+            acceleration = velocity[:, 1:] - velocity[:, :-1]
+            if acceleration.size(1) >= 2:
+                accel_diff = acceleration[:, 1:] - acceleration[:, :-1]
+                loss_dict['loss_acceleration'] = torch.mean(accel_diff ** 2) * self.acceleration_weight
+        
+        if joints.size(1) >= 2:
+            bone_loss = 0
+            for ja, jb in self.skeleton_pairs:
+                bone_lengths = torch.norm(
+                    joints[:, :, jb] - joints[:, :, ja], dim=-1
+                )
+                bone_loss += torch.var(bone_lengths, dim=1).mean()
+            loss_dict['loss_bone'] = bone_loss * self.bone_length_weight
+        
+        total = sum(loss_dict.values())
+        loss_dict['loss_temporal'] = total
+        
+        return loss_dict
+
+
 class Loss(nn.Module):
-    def __init__(self):
+    def __init__(self, temporal_weight=0.1):
         super().__init__()
         self.criterion_param = nn.MSELoss()
         self.criterion_joints = nn.MSELoss()
         self.criterion_vertices = nn.MSELoss()
         self.chamfer_loss = ChamferDistanceL1()
         self.smpl = SMPL()
+        self.temporal_loss = TemporalConsistencyLoss()
+        self.temporal_weight = temporal_weight
 
     def forward(self, **kw):
         B, T = kw['human_points'].shape[:2]
@@ -32,12 +88,10 @@ class Loss(nn.Module):
         details = {}
 
         if 'pred_rotmats' in kw:
-            # L_{\theta}
             pred_rotmats = kw['pred_rotmats'].reshape(B, T, 24, 3, 3)
             loss_param = self.criterion_param(pred_rotmats, gt_rotmats)
             details['loss_param'] = loss_param
 
-            # L_{J_{SMPL}}
             pred_human_vertices = self.smpl(
                 pred_rotmats.reshape(-1, 24, 3, 3), torch.zeros((B * T, 10), device=gt_pose.device))
             pred_smpl_joints = self.smpl.get_full_joints(
@@ -47,46 +101,49 @@ class Loss(nn.Module):
             details['loss_smpl_joints'] = loss_smpl_joints
 
         if 'pred_full_joints' in kw:
-            # L_{J}
             pred_full_joints = kw['pred_full_joints']
             loss_full_joints = self.criterion_joints(
                 pred_full_joints, gt_full_joints)
             details['loss_full_joints'] = loss_full_joints
 
-        # ==== 点云重建Chamfer损失 ====
         if 'gen_points' in kw:
-            pred_points = kw['gen_points'].reshape(B * T, -1, 3)  # (B*T, M, 3)
+            pred_points = kw['gen_points'].reshape(B * T, -1, 3)
             M = pred_points.shape[1]
-            K = M - 24  # 表面点数
+            K = M - 24
             assert K > 0, "Predicted coarse point count must be > 24 (joint count)"
 
             smpl_rotmats = gt_rotmats.reshape(B * T, 24, 3, 3)
             smpl_vertices = self.smpl(
                 smpl_rotmats,
                 torch.zeros((B * T, 10), device=gt_pose.device)
-            )  # (B*T, 6890, 3)
+            )
 
-            # ==== 下采样 SMPL 顶点点云 ====
             with torch.no_grad():
                 smpl_vertices_down = pointnet2_utils.furthest_point_sample(
                     smpl_vertices.contiguous(), K
-                )  # (B*T, K)
+                )
                 smpl_surface = pointnet2_utils.gather_operation(
                     smpl_vertices.transpose(1, 2).contiguous(), smpl_vertices_down
-                ).transpose(1, 2).contiguous()  # (B*T, K, 3)
+                ).transpose(1, 2).contiguous()
 
-            joint_points = gt_full_joints.reshape(B * T, 24, 3)  # (B*T, 24, 3)
+            joint_points = gt_full_joints.reshape(B * T, 24, 3)
 
-            # 合并监督点云：表面点 + 骨架点
-            merged_gt_points = torch.cat([smpl_surface, joint_points], dim=1)  # (B*T, M, 3)
+            merged_gt_points = torch.cat([smpl_surface, joint_points], dim=1)
 
-            # 计算 Chamfer 损失
             loss_chamfer = self.chamfer_loss(pred_points, merged_gt_points)
             details['loss_chamfer_smpl'] = loss_chamfer
 
-        # 累加所有损失
+        if 'pred_full_joints' in kw:
+            pred_full_joints = kw['pred_full_joints']
+            temporal_dict = self.temporal_loss(pred_full_joints)
+            details.update(temporal_dict)
+
         loss = 0
-        for _, v in details.items():
-            loss += v
+        for k, v in details.items():
+            if k == 'loss_temporal':
+                loss += self.temporal_weight * v
+            else:
+                loss += v
+        
         details['loss'] = loss
         return loss, details

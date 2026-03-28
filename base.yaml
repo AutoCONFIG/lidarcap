@@ -1,4 +1,25 @@
 DEVICE: 'cuda'
+
+MAMBA:
+  d_model: 1024
+  d_state: 16
+  d_conv: 4
+  expand: 2
+  n_layers: 2
+  dropout: 0.1
+
+TEMPORAL_LOSS:
+  enabled: True
+  weight: 0.1
+  velocity_weight: 1.0
+  acceleration_weight: 0.5
+  bone_length_weight: 0.3
+
+MULTIMODAL:
+  enabled: False
+  rgb_encoder: 'resnet18'
+  fusion_type: 'gcsp'
+
 TRAIN:
   GEN:
     # 学习率和优化器参数
