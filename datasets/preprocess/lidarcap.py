@@ -18,7 +18,7 @@ from modules.smpl import SMPL
 smpl = SMPL().cuda()
 
 
-ROOT_PATH = 'your_raw_data_path'
+ROOT_PATH = '/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M'
 MAX_PROCESS_COUNT = 64
 
 # img_filenames = []
@@ -118,41 +118,19 @@ def foo(id, args):
     depths = []
     full_joints = []
 
-    assert(args.seqlen != 0)
-
     n = len(cur_betas)
-    # 直接补齐
-    while n % args.seqlen != 0:
-        # cur_img_filenames.append(cur_img_filenames[-1])
-        cur_betas.append(cur_betas[-1])
-        cur_poses.append(cur_poses[-1])
-        cur_trans.append(cur_trans[-1])
-        # cur_vertices.append(cur_vertices[-1])
-        cur_point_clouds.append(cur_point_clouds[-1])
-        cur_points_nums.append(cur_points_nums[-1])
-        if cur_depths:  # 检查列表不为空
-            cur_depths.append(cur_depths[-1])
-        n += 1
-    times = n // args.seqlen
-    for i in range(times):
-        # [lb, ub)
-        lb = i * args.seqlen
-        ub = lb + args.seqlen
-        # img_filenames.append(cur_img_filenames[lb:ub])
-        betas.append(np.stack(cur_betas[lb:ub]))
-        np_poses = np.stack(cur_poses[lb:ub])
-        poses.append(np_poses)
-        trans.append(np.stack(cur_trans[lb:ub]))
-        # vertices.append(np.stack(cur_vertices[lb:ub]))
-        point_clouds.append(np.stack(cur_point_clouds[lb:ub]))
-        points_nums.append(np.stack(cur_points_nums[lb:ub]))
-        depths.append(cur_depths[lb:ub])
+    for i in range(n):
+        poses.append(cur_poses[i])
+        betas.append(cur_betas[i])
+        trans.append(cur_trans[i])
+        point_clouds.append(cur_point_clouds[i])
+        points_nums.append(cur_points_nums[i])
 
+        np_pose = np.stack([cur_poses[i]])
         full_joints.append(smpl.get_full_joints(smpl(torch.from_numpy(
-            np_poses).cuda(), torch.zeros((args.seqlen, 10)).cuda())).cpu().numpy())
+            np_pose).cuda(), torch.zeros((1, 10)).cuda())).cpu().numpy()[0])
 
-    # return poses, betas, trans, vertices, point_clouds, points_nums
-    return np.stack(poses), np.stack(betas), np.stack(trans), np.stack(point_clouds), np.stack(points_nums), depths, np.stack(full_joints)
+    return np.array(poses), np.array(betas), np.array(trans), np.array(point_clouds), np.array(points_nums), cur_depths, np.array(full_joints)
 
 
 def test(args):
@@ -173,13 +151,13 @@ def dump(args):
     seq_str = '' if args.seqlen == 0 else 'seq{}_'.format(args.seqlen)
     ids = get_sorted_ids(args.ids)
 
-    whole_poses = np.zeros((0, args.seqlen, 72))
-    whole_betas = np.zeros((0, args.seqlen, 10))
-    whole_trans = np.zeros((0, args.seqlen, 3))
-    # whole_vertices = np.zeros((0, args.seqlen, 6890, 3))
-    whole_point_clouds = np.zeros((0, args.seqlen, args.npoints, 3))
-    whole_points_nums = np.zeros((0, args.seqlen))
-    whole_full_joints = np.zeros((0, args.seqlen, 24, 3))
+    whole_poses = np.zeros((0, 72))
+    whole_betas = np.zeros((0, 10))
+    whole_trans = np.zeros((0, 3))
+    # whole_vertices = np.zeros((0, 6890, 3))
+    whole_point_clouds = np.zeros((0, args.npoints, 3))
+    whole_points_nums = np.zeros((0,))
+    whole_full_joints = np.zeros((0, 24, 3))
     whole_depths = []
 
     for id in ids:
@@ -187,15 +165,15 @@ def dump(args):
         poses, betas, trans, point_clouds, points_nums, depths, full_joints = foo(
             id, args)
 
-        whole_poses = np.concatenate((whole_poses, np.stack(poses)))
-        whole_betas = np.concatenate((whole_betas, np.stack(betas)))
-        whole_trans = np.concatenate((whole_trans, np.stack(trans)))
+        whole_poses = np.concatenate((whole_poses, poses))
+        whole_betas = np.concatenate((whole_betas, betas))
+        whole_trans = np.concatenate((whole_trans, trans))
         # whole_vertices = np.concatenate(
         #     (whole_vertices, np.stack(vertices)))
         whole_point_clouds = np.concatenate(
-            (whole_point_clouds, np.stack(point_clouds)))
+            (whole_point_clouds, point_clouds))
         whole_points_nums = np.concatenate(
-            (whole_points_nums, np.stack(points_nums)))
+            (whole_points_nums, points_nums))
         whole_depths += depths
         whole_full_joints = np.concatenate(
             (whole_full_joints, full_joints))
@@ -213,7 +191,7 @@ def dump(args):
 
 
 if __name__ == '__main__':
-    extras_path = 'your_save_path'
+    extras_path = '/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M'
     os.makedirs(extras_path, exist_ok=True)
 
     parser = argparse.ArgumentParser()

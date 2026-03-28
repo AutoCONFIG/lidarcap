@@ -45,7 +45,7 @@ LOG_INTERVAL=100
 DEBUG="false"
 
 # 恢复训练路径（留空表示新建训练）
-RESUME_PATH="/media/yun/nfs_giga/lidarcap_output/run_202603151738"
+RESUME_PATH=""
 
 # 检查点路径（用于评估/可视化，留空则自动选择）
 CKPT_PATH=""
