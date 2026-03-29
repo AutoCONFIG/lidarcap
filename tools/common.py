@@ -62,18 +62,3 @@ def clean_summary(filesuammry):
     return filesuammry
 
 
-def login():
-    """设置wandb登录信息
-    
-    注意：空凭证不会设置环境变量，避免配置被覆盖
-    """
-    local_server = {
-        'WANDB_BASE_URL': '',
-        'WANDB_ENTITY': '',
-        'WANDB_API_KEY': '',
-    }
-    for k, v in local_server.items():
-        if v:  # 只设置非空凭证
-            os.environ[k] = v
-
-

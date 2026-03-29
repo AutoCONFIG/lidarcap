@@ -3,6 +3,9 @@ import numpy as np
 import torch
 
 
+SMPL_TORSO_LENGTH = 0.5127067
+
+
 def compute_accel(joints):
     """
     Computes acceleration of 3D joints.
@@ -206,19 +209,13 @@ def compute_error_verts(pred_verts, target_verts):
     return np.mean(error_per_vert, axis=1)
 
 
-    # SMPL躯干长度（单位：米）
-    # 来源：SMPL模型骨骼定义
-    SMPL_TORSO_LENGTH = 0.5127067
-
-
 def compute_pck(pred_joints, gt_joints, threshold):
-    # (B, N, 3), (B, N, 3)
     B = len(pred_joints)
     pred_joints -= pred_joints[:, :1, :]
     gt_joints -= gt_joints[:, :1, :]
 
-    distance = np.sqrt(((pred_joints - gt_joints) ** 2).sum(-1))  # (B, N)
-    correct = distance < threshold * torsal_length
+    distance = np.sqrt(((pred_joints - gt_joints) ** 2).sum(-1))
+    correct = distance < threshold * SMPL_TORSO_LENGTH
     correct = (correct.sum(0) / B).mean()
     return correct
 
@@ -227,8 +224,8 @@ def compute_frame_pck(pred_joints, gt_joints, threshold):
     pred_joints -= pred_joints[:, :1, :]
     gt_joints -= gt_joints[:, :1, :]
 
-    distance = np.sqrt(((pred_joints - gt_joints) ** 2).sum(-1))  # (B, N)
-    correct = distance < threshold * torsal_length
+    distance = np.sqrt(((pred_joints - gt_joints) ** 2).sum(-1))
+    correct = distance < threshold * SMPL_TORSO_LENGTH
     correct = correct.mean(-1)
     return correct
 

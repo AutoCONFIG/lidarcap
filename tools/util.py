@@ -11,25 +11,30 @@ import numpy as np
 import pickle
 import torch
 
-data_folder = 'data'
-lidarcap_dataset_folder = 'data/lidarcap'
+from config import get_cfg
 
 
-# SMPL模型缓存
 _smpl_model = None
 _face_index = None
+_cfg = None
+
+
+def _get_cfg():
+    global _cfg
+    if _cfg is None:
+        _cfg = get_cfg()
+    return _cfg
+
 
 def _load_smpl_model():
-    """加载并缓存SMPL模型"""
     global _smpl_model, _face_index
     if _smpl_model is None:
-        model_file = 'data/basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
+        cfg = _get_cfg()
+        model_file = cfg.PATHS.SMPL_MODEL
         with open(model_file, 'rb') as f:
             _smpl_model = pickle.load(f, encoding='iso-8859-1')
         _face_index = _smpl_model['f'].astype(np.int64)
     return _smpl_model, _face_index
-
-
 
 
 def get_gt_pose(pose_filename):
@@ -40,7 +45,9 @@ def get_gt_pose(pose_filename):
 
 
 def get_gt_poses(idx):
-    pose_folder = '{}/labels/3d/pose/{}'.format(lidarcap_dataset_folder, idx)
+    cfg = _get_cfg()
+    lidarcap_dataset_folder = cfg.PATHS.DATASET_DIR
+    pose_folder = f'{lidarcap_dataset_folder}/labels/3d/pose/{idx}'
     gt_poses = []
     pose_filenames = list(filter(lambda x: x.endswith(
         '.json'), path_util.get_sorted_filenames_by_index(pose_folder)))

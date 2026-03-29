@@ -577,26 +577,26 @@ if __name__ == '__main__':
     dataset_name = args.dataset
     
     # 加载配置
-    cfg = get_cfg(dataset_name=dataset_name)
+    cfg = get_cfg()
     
     # 从配置文件中获取训练策略参数
-    lr = cfg.TRAIN.GEN.get('LR', 0.0001)
-    lr_patience = cfg.TRAIN.GEN.get('patience', 5)
-    lr_factor = cfg.TRAIN.GEN.get('factor', 0.5)
-    lr_min = float(cfg.TRAIN.GEN.get('min_lr', 1e-7))
-    lr_threshold = cfg.TRAIN.GEN.get('threshold', 0.001)
+    lr = cfg.TRAIN.learning_rate
+    lr_patience = cfg.TRAIN.scheduler.patience
+    lr_factor = cfg.TRAIN.scheduler.factor
+    lr_min = float(cfg.TRAIN.scheduler.min_lr)
+    lr_threshold = cfg.TRAIN.scheduler.threshold
     
-    early_stopping_patience = cfg.TRAIN.GEN.get('early_stopping', 15)
-    early_stopping_min_delta = cfg.TRAIN.GEN.get('early_stopping_min_delta', 0.001)
+    early_stopping_patience = cfg.TRAIN.early_stopping.patience
+    early_stopping_min_delta = cfg.TRAIN.early_stopping.min_delta
     
-    grad_clip = cfg.TRAIN.GEN.get('grad_clip', None)
-    use_amp = cfg.TRAIN.GEN.get('use_amp', False)
+    grad_clip = cfg.TRAIN.grad_clip
+    use_amp = cfg.TRAIN.use_amp
     
-    warmup_epochs = cfg.TRAIN.GEN.get('warmup_epochs', 0)
-    warmup_min_lr = cfg.TRAIN.GEN.get('warmup_min_lr', 1e-8)
+    warmup_epochs = cfg.TRAIN.warmup.epochs
+    warmup_min_lr = cfg.TRAIN.warmup.min_lr
     
-    save_every = cfg.TRAIN.GEN.get('save_every', 1)
-    keep_checkpoints = cfg.TRAIN.GEN.get('keep_checkpoints', 5)
+    save_every = cfg.TRAIN.checkpoint.save_every
+    keep_checkpoints = cfg.TRAIN.checkpoint.keep_checkpoints
     
     # Load training and validation data
     if args.preload:
@@ -622,8 +622,8 @@ if __name__ == '__main__':
     net = Regressor()
     loss = Loss()
     
-    temporal_loss_config = cfg.get('TEMPORAL_LOSS', {})
-    temporal_weight = temporal_loss_config.get('weight', 0.1)
+    temporal_loss_config = cfg.TEMPORAL_LOSS
+    temporal_weight = temporal_loss_config.weight
     loss.temporal_weight = temporal_weight
 
     # Define optimizer with improved parameters

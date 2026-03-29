@@ -84,7 +84,11 @@ class TemporalDataset(Dataset):
         'random_permutation': False,
         'use_trans_to_normalize': False,
         'replace_pc_strategy': 'random',
-        'noise_distribution': 'uniform'
+        'noise_distribution': 'uniform',
+        'use_sample': False,
+        'use_boundary': False,
+        'inside_random': False,
+        'concat_info': False,
     }
 
     def __init__(self, cfg=None, **kwargs):
@@ -124,7 +128,7 @@ class TemporalDataset(Dataset):
         atexit.register(self._cleanup)
 
         if self.cfg.use_rot or self.cfg.use_straight:
-            from util.smpl import SMPL
+            from modules.smpl import SMPL
             self.smpl = SMPL()
             # self.smpl = SMPL()
         else:
@@ -469,7 +473,7 @@ class TemporalDataset(Dataset):
                 parts.append(item['human_boundary'])
             
             if len(parts) > 1:
-                item['human_points'] = np.concatenate(parts, axis=1)
+                item['human_points'] = torch.cat(parts, dim=1)
         return item
 
     def __len__(self):
@@ -604,7 +608,11 @@ class CachedLidarCapDataset(Dataset):
         'use_trans_to_normalize': False,
         'replace_pc_strategy': 'random',
         'noise_distribution': 'uniform',
-        'preload': False,  # 是否预加载到内存
+        'preload': False,
+        'use_sample': False,
+        'use_boundary': False,
+        'inside_random': False,
+        'concat_info': False,
     }
 
     def __init__(self, cfg=None, **kwargs):
@@ -662,7 +670,7 @@ class CachedLidarCapDataset(Dataset):
             print("[CachedLidarCapDataset] 预加载完成")
 
         if self.cfg.use_rot or self.cfg.use_straight:
-            from util.smpl import SMPL
+            from modules.smpl import SMPL
             self.smpl = SMPL()
         else:
             self.lidar_to_mocap_RT_flag = False
@@ -905,9 +913,14 @@ class CachedLidarCapDataset(Dataset):
             item['plane_model'] = torch.from_numpy(plane_model).float()
 
         if self.cfg.concat_info:
-            concat = np.concatenate(
-                (item['human_points'], item['back_pc'], item['human_boundary']), axis=1)
-            item['human_points'] = concat
+            parts = [item['human_points']]
+            if item.get('back_pc') is not None:
+                parts.append(item['back_pc'])
+            if item.get('human_boundary') is not None:
+                parts.append(item['human_boundary'])
+            
+            if len(parts) > 1:
+                item['human_points'] = torch.cat(parts, dim=1)
 
         return item
 
@@ -927,15 +940,21 @@ class CachedLidarCapDataset(Dataset):
         return P_z_ + random_dis
 
     def get_range(self, intial, P, boundary, error_index):
-        for i in range(len(error_index)):
-            if intial < P < boundary[error_index[i + 1]]:
-                range_y = [intial - P, boundary[error_index[i + 1]] - P]
-                return range_y
-            elif boundary[error_index[i + 1]] < P < intial:
-                range_y = [boundary[error_index[i + 1]] - P, intial - P]
-                return range_y
-            else:
-                return [0, 0]
+        if len(error_index) == 0:
+            return [0, 0]
+        
+        for i in range(len(error_index) - 1):
+            next_idx = error_index[i + 1]
+            if next_idx + 1 >= len(boundary):
+                continue
+            
+            boundary_val = boundary[next_idx + 1]
+            if intial < P < boundary_val:
+                return [intial - P, boundary_val - P]
+            elif boundary_val < P < intial:
+                return [boundary_val - P, intial - P]
+        
+        return [0, 0]
 
     def __len__(self):
         return self.length
