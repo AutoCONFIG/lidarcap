@@ -15,6 +15,21 @@ data_folder = 'data'
 lidarcap_dataset_folder = 'data/lidarcap'
 
 
+# SMPL模型缓存
+_smpl_model = None
+_face_index = None
+
+def _load_smpl_model():
+    """加载并缓存SMPL模型"""
+    global _smpl_model, _face_index
+    if _smpl_model is None:
+        model_file = 'data/basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
+        with open(model_file, 'rb') as f:
+            _smpl_model = pickle.load(f, encoding='iso-8859-1')
+        _face_index = _smpl_model['f'].astype(np.int64)
+    return _smpl_model, _face_index
+
+
 
 
 def get_gt_pose(pose_filename):
@@ -86,10 +101,9 @@ def save_smpl_ply(vertices, filename):
     if vertices.ndim == 3:
         assert vertices.shape[0] == 1
         vertices = vertices.squeeze(0)
-    model_file = 'data/basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
-    with open(model_file, 'rb') as f:
-        smpl_model = pickle.load(f, encoding='iso-8859-1')
-        face_index = smpl_model['f'].astype(np.int64)
+    
+    smpl_model, face_index = _load_smpl_model()
+    
     face_1 = np.ones((face_index.shape[0], 1))
     face_1 *= 3
     face = np.hstack((face_1, face_index)).astype(int)

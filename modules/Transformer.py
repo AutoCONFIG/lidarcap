@@ -7,7 +7,7 @@ from .dgcnn_group import DGCNN_Grouper
 from .logger import get_root_logger, get_logger, print_log
 import numpy as np
 
-def knn_point(nsample, xyz, new_xyz):
+def knn_point(n_samples, xyz, new_xyz):
     """
     Input:
         nsample: max sample number in local region

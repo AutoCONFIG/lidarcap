@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from modules.smpl import SMPL
+from modules.smpl import SMPL, get_smpl_model
 from modules.geometry import axis_angle_to_rotation_matrix
 from libs.chamfer_dist import ChamferDistanceL1
 from pointnet2_ops import pointnet2_utils
@@ -69,13 +69,20 @@ class TemporalConsistencyLoss(nn.Module):
 
 
 class Loss(nn.Module):
+    _smpl_instance = None  # 类级别的SMPL单例
+    
     def __init__(self, temporal_weight=0.1):
         super().__init__()
         self.criterion_param = nn.MSELoss()
         self.criterion_joints = nn.MSELoss()
         self.criterion_vertices = nn.MSELoss()
         self.chamfer_loss = ChamferDistanceL1()
-        self.smpl = SMPL()
+        
+        # 使用单例SMPL模型
+        if Loss._smpl_instance is None:
+            Loss._smpl_instance = SMPL()
+        self.smpl = Loss._smpl_instance
+        
         self.temporal_loss = TemporalConsistencyLoss()
         self.temporal_weight = temporal_weight
 

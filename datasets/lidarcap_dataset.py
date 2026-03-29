@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import h5py
 from torch.utils.data import Dataset
-import os, random, cv2
+import os, random, cv2, atexit
 import collections.abc
 import copy
 
@@ -113,11 +113,15 @@ class TemporalDataset(Dataset):
         for id in self.dataset_ids:
             with h5py.File(os.path.join(self.dataset_path, f'{id}.hdf5'), 'r') as f:
                 assert f['pose'][0].shape == (
-                72,), f"Dataset：{os.path.join(self.dataset_path, f'{id}.hdf5')}, the pose shape:{f['pose'][0].shape} is wrong！"
+                72,), f"Dataset：{os.path.join(self.dataset_path, f'{id}.hdf5')}, pose shape:{f['pose'][0].shape} is wrong！"
                 self.length += (len(
                     f['pose']) - self.cfg.drop_first_n) // self.cfg.seqlen
                 if 'lidar_to_mocap_RT' not in f:
                     self.lidar_to_mocap_RT_flag = False
+
+        # 注册清理函数，确保文件被关闭
+        import atexit
+        atexit.register(self._cleanup)
 
         if self.cfg.use_rot or self.cfg.use_straight:
             from util.smpl import SMPL
@@ -127,16 +131,22 @@ class TemporalDataset(Dataset):
             self.lidar_to_mocap_RT_flag = False
 
     def __del__(self):
+        self._cleanup()
+        
+    def _cleanup(self):
+        """清理资源，关闭所有HDF5文件"""
         if hasattr(self, 'datas'):
             for data in self.datas:
-                data.close()
+                try:
+                    data.close()
+                except Exception as e:
+                    print(f'[WARNING] Failed to close HDF5 file: {e}')
+            del self.datas
             print('success close dataset')
 
     def open_hdf5(self):
         self.datas = []
         self.datas_length = []
-        # for id in tqdm(self.dataset_ids, desc="Load Datasets", ncols=60):
-
         for id in self.dataset_ids:
             f = h5py.File(os.path.join(self.dataset_path, f'{id}.hdf5'), 'r')
             self.datas_length.append(len(f['pose']))
@@ -185,18 +195,6 @@ class TemporalDataset(Dataset):
 
                 plane_model = data['plane_model'][l:r] if 'plane_model' in data else None
 
-                # # 打印关键变量形状，方便调试
-                # print(f"[{raw_index}] [DEBUG access_hdf5] shapes:")
-                # print(f"  pose: {pose.shape}")
-                # print(f"  full_joints: {full_joints.shape}")
-                # print(f"  human_points: {human_points.shape}")
-                if back_pc is not None:
-                    print(f"  back_pc: {back_pc.shape}")
-                if plane_model is not None:
-                    print(f"  plane_model: {plane_model.shape}")
-                if twice_noice is not None:
-                    print(f"  twice_noice: {twice_noice.shape}")
-
                 assert pose.shape == (seqlen, 72) and full_joints.shape == (seqlen, 24, 3) and human_points.shape == (seqlen, 512, 3), \
                     f"shape is wrong! pose: {pose.shape}, full_joints: {full_joints.shape}, human_points: {human_points.shape}"
 
@@ -238,16 +236,29 @@ class TemporalDataset(Dataset):
 
         assert all([len(e) == left_i for e in l]), 'assert false:split_list_by_dataset'
 
-    def get_range(self, intial, P, boundary, error_index):
-        for i in range(len(error_index)):
-            if intial < P < boundary[error_index[i + 1]]:
-                range_y = [intial - P, boundary[error_index[i + 1]] - P]
-                return range_y
-            elif boundary[error_index[i + 1]] < P < intial:
-                range_y = [boundary[error_index[i + 1]] - P, intial - P]
-                return range_y
-            else:
-                return [0, 0]
+    def get_range(self, initial, P, boundary, error_index):
+        """计算P点在boundary中的有效范围
+        
+        修复原逻辑错误：
+        1. 避免过早return
+        2. 修正拼写错误 (intial -> initial)
+        3. 添加边界检查
+        """
+        if len(error_index) == 0:
+            return [0, 0]
+        
+        for i in range(len(error_index) - 1):
+            next_idx = error_index[i + 1]
+            if next_idx + 1 >= len(boundary):
+                continue
+            
+            boundary_val = boundary[next_idx + 1]
+            if initial < P < boundary_val:
+                return [initial - P, boundary_val - P]
+            elif boundary_val < P < initial:
+                return [boundary_val - P, initial - P]
+        
+        return [0, 0]
 
     def add_dis_xy(self, P_x_, P_y_, boundary_x_, boundary_y_):
         error_x_index = np.argsort(np.abs(boundary_x_ - P_x_))
@@ -276,9 +287,10 @@ class TemporalDataset(Dataset):
             back_pc, plane_model, twice_noise = self.access_hdf5(index)
 
         except NotImplementedError as e:
-            print(e)
-            print(
-                f'[ERROR]access_hdf5 error, index is {index}, hdf5 is {self.cfg.dataset_ids[self.acquire_hdf5_by_index(index)[0]]}')
+            print(f'[ERROR] access_hdf5 error at index {index}: {e}')
+            dataset_id = self.cfg.dataset_ids[self.acquire_hdf5_by_index(index)[0]] if hasattr(self, 'cfg') else 'unknown'
+            print(f'[ERROR] Dataset ID: {dataset_id}')
+            raise
 
         if self.cfg.ret_raw_pc:
             item['point_clouds'] = human_points.copy()
@@ -450,9 +462,14 @@ class TemporalDataset(Dataset):
             item['plane_model'] = torch.from_numpy(plane_model).float()
 
         if self.cfg.concat_info:
-            concat = np.concatenate(
-                (item['human_points'], item['back_pc'], item['human_boundary']), axis=1)
-            item['human_points'] = concat
+            parts = [item['human_points']]
+            if item.get('back_pc') is not None:
+                parts.append(item['back_pc'])
+            if item.get('human_boundary') is not None:
+                parts.append(item['human_boundary'])
+            
+            if len(parts) > 1:
+                item['human_points'] = np.concatenate(parts, axis=1)
         return item
 
     def __len__(self):
@@ -655,6 +672,10 @@ class CachedLidarCapDataset(Dataset):
             self.h5file.close()
             print('[CachedLidarCapDataset] HDF5文件已关闭')
 
+    def _has_key(self, key):
+        """检查键是否存在于缓存或HDF5文件中"""
+        return key in self.cache or key in self.h5file
+
     def _get_data(self, key, start, end):
         """从缓存或文件读取数据"""
         if key in self.cache:
@@ -681,7 +702,7 @@ class CachedLidarCapDataset(Dataset):
                 betas = self._get_data('shape', l, r)
                 trans = self._get_data('trans', l, r)
 
-                if 'masked_point_clouds' in self.h5file:
+                if self._has_key('masked_point_clouds'):
                     human_points = self._get_data('masked_point_clouds', l, r)
                 else:
                     human_points = self._get_data('point_clouds', l, r)
@@ -689,31 +710,30 @@ class CachedLidarCapDataset(Dataset):
                 points_num = self._get_data('points_num', l, r)
                 full_joints = self._get_data('full_joints', l, r)
 
-                rotmats = self._get_data('rotmats', l, r) if 'rotmats' in self.h5file else None
+                rotmats = self._get_data('rotmats', l, r) if self._has_key('rotmats') else None
 
                 if self.lidar_to_mocap_RT_flag:
                     lidar_to_mocap_RT = self._get_data('lidar_to_mocap_RT', l, r)
                 else:
                     lidar_to_mocap_RT = None
 
-                if 'body_label' in self.h5file:
+                if self._has_key('body_label'):
                     body_label = self._get_data('body_label', l, r)
                 else:
-                    body_fake = np.ones(self._get_data('point_clouds', offset, offset + length).shape[:2])
-                    body_label = body_fake[self.cfg.drop_first_n + index * seqlen:
-                                          self.cfg.drop_first_n + index * seqlen + seqlen]
+                    body_fake = np.ones(human_points.shape[:2])
+                    body_label = body_fake
 
-                back_pc = self._get_data('background_m', l, r) if 'background_m' in self.h5file else None
-                twice_noice = self._get_data('whole_noise', l, r) if 'whole_noise' in self.h5file else None
-                plane_model = self._get_data('plane_model', l, r) if 'plane_model' in self.h5file else None
+                back_pc = self._get_data('background_m', l, r) if self._has_key('background_m') else None
+                twice_noice = self._get_data('whole_noise', l, r) if self._has_key('whole_noise') else None
+                plane_model = self._get_data('plane_model', l, r) if self._has_key('plane_model') else None
 
                 # 检查数据形状
                 assert pose.shape == (seqlen, 72) and full_joints.shape == (seqlen, 24, 3) and human_points.shape == (seqlen, 512, 3), \
                     f"shape is wrong! pose: {pose.shape}, full_joints: {full_joints.shape}, human_points: {human_points.shape}"
 
-                sample_pc = self._get_data('sample_pc', l, r) if 'sample_pc' in self.h5file else None
-                boundary_label = self._get_data('boundary_label', l, r) if 'boundary_label' in self.h5file else None
-                project_image = self._get_data('project_image', l, r) if 'project_image' in self.h5file else None
+                sample_pc = self._get_data('sample_pc', l, r) if self._has_key('sample_pc') else None
+                boundary_label = self._get_data('boundary_label', l, r) if self._has_key('boundary_label') else None
+                project_image = self._get_data('project_image', l, r) if self._has_key('project_image') else None
 
                 return pose, betas, trans, human_points, points_num, full_joints, \
                        rotmats, lidar_to_mocap_RT, body_label, sample_pc, boundary_label, \

@@ -1,0 +1,36 @@
+# 路径配置文件
+# 使用环境变量或默认值，避免硬编码路径
+
+PATHS:
+  # 数据目录
+  DATA_DIR: 'data'
+  
+  # 数据集根目录（优先使用环境变量 LIDARHUMAN_DATASET）
+  DATASET_DIR: null  # 将在运行时从环境变量或默认值设置
+  
+  # SMPL模型文件
+  SMPL_MODEL: 'data/basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
+  
+  # SMPL faces文件
+  SMPL_FACES: 'data/smpl_faces.npy'
+  
+  # 关节回归器
+  JOINT_REGRESSOR: 'data/J_regressor_extra.npy'
+  
+  # 数据集缓存目录
+  DATASET_CACHE: 'data/dataset_cache'
+  
+  # 输出目录
+  OUTPUT_DIR: 'output'
+
+# 关节索引配置
+JOINTS:
+  # 24个关节的索引映射
+  # 对应关系：
+  # 0 - Right Ankle, 1 - Right Knee, 2 - Right Hip, 3 - Left Hip
+  # 4 - Left Knee, 5 - Left Ankle, 6 - Right Wrist, 7 - Right Elbow
+  # 8 - Right Shoulder, 9 - Left Shoulder, 10 - Left Elbow, 11 - Left Wrist
+  # 12 - Neck, 13 - Top of Head, 14 - Pelvis, 15 - Thorax
+  # 16 - Spine, 17 - Jaw, 18 - Head, 19 - Nose
+  # 20 - Left Eye, 21 - Right Eye, 22 - Left Ear, 23 - Right Ear
+  INDEX: [8, 5, 29, 30, 4, 7, 21, 19, 17, 16, 18, 20, 31, 32, 33, 34, 35, 36, 37, 24, 26, 25, 28, 27]

@@ -1,17 +1,18 @@
 """
-This file contains the definition of the SMPL model
-forward: using pose and beta calculate vertex location
+This file contains to definition of to SMPL model
+forward: using pose and beta calculate to vertex location
 
-function get joints: calculate joints from vertex location
+function get joints: calculate joints from to vertex location
 """
-import config as cfg
-import numpy as np
-import pickle
-import torch
-import torch.nn as nn
 import os
 import sys
 import warnings
+import pickle
+import numpy as np
+import torch
+import torch.nn as nn
+
+from . import config as cfg
 
 # 使用pickle context manager抑制NumPy的dtype警告
 class PickleWarningsContext:
@@ -22,6 +23,16 @@ class PickleWarningsContext:
     def __exit__(self, exc_type, exc_val, exc_tb):
         warnings.filterwarnings('default', message=".*dtype.*align.*")
         return False
+
+# SMPL模型单例
+_smpl_singleton = None
+
+def get_smpl_model():
+    """获取SMPL模型单例"""
+    global _smpl_singleton
+    if _smpl_singleton is None:
+        _smpl_singleton = SMPL()
+    return _smpl_singleton
 
 sys.path.append(os.path.dirname(__file__))
 import geometry
@@ -60,22 +71,10 @@ class SMPL(nn.Module):
         self.register_buffer('kintree_table', torch.from_numpy(
             smpl_model['kintree_table'].astype(np.int64)))
         id_to_col = {self.kintree_table[1, i].item(): i for i in
-                     range(self.kintree_table.shape[1])}
+                      range(self.kintree_table.shape[1])}
         self.register_buffer('parent', torch.LongTensor(
             [id_to_col[self.kintree_table[0, it].item()] for it in
-             range(1, self.kintree_table.shape[1])]))
-
-        self.pose_shape = [24, 3]
-        self.beta_shape = [10]
-        self.translation_shape = [3]
-
-        self.pose = torch.zeros(self.pose_shape)
-        self.beta = torch.zeros(self.beta_shape)
-        self.translation = torch.zeros(self.translation_shape)
-
-        self.verts = None
-        self.J = None
-        self.R = None
+              range(1, self.kintree_table.shape[1])]))
 
         J_regressor_extra = torch.from_numpy(
             np.load(cfg.JOINT_REGRESSOR_TRAIN_EXTRA)).float()
@@ -88,14 +87,13 @@ class SMPL(nn.Module):
         batch_size = pose.shape[0]
         v_template = self.v_template[None, :]
         shapedirs = self.shapedirs.view(-1,
-                                        10)[None, :].expand(batch_size, -1, -1)
+                                         10)[None, :].expand(batch_size, -1, -1)
         beta = beta[:, :, None]
         v_shaped = torch.matmul(shapedirs, beta).view(-1, 6890, 3) + v_template
-        # batched sparse matmul not supported in pytorch
-        J = []
-        for i in range(batch_size):
-            J.append(torch.matmul(self.J_regressor, v_shaped[i]))
-        J = torch.stack(J, dim=0)
+        
+        # 优化：批量计算J矩阵，避免循环
+        J = torch.einsum('ij,bkj->bki', self.J_regressor, v_shaped)
+        
         # input it rotmat: (bs,24,3,3)
         if pose.ndimension() == 4:
             R = pose

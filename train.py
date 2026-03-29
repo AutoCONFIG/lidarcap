@@ -14,7 +14,7 @@ import time
 import threading
 import queue
  
-from config import DATASET_DIR
+from config import get_cfg
 from datasets.lidarcap_dataset import collate, TemporalDataset, CachedLidarCapDataset
 from modules.geometry import rotation_matrix_to_axis_angle
 from modules.regressor import Regressor
@@ -332,12 +332,23 @@ class TrainingProgressTracker:
         self.progress_file = os.path.join(model_dir, 'training_progress.json')
         self.results_file = os.path.join(model_dir, 'epoch_results.json')
         
-        # Register signal handler for graceful shutdown
-        signal.signal(signal.SIGINT, self._signal_handler)
+        # Windows兼容的信号处理
+        import platform
+        if platform.system() != 'Windows':
+            signal.signal(signal.SIGINT, self._signal_handler)
+        else:
+            # Windows上使用atexit
+            import atexit
+            atexit.register(self._cleanup)
         
     def _signal_handler(self, signum, frame):
         self.logger.info("\nReceived interrupt signal. Will stop after current epoch...")
         self.should_stop = True
+    
+    def _cleanup(self):
+        """Windows兼容的清理方法"""
+        if self.should_stop:
+            self.logger.info("Training interrupted. Cleaning up...")
         
     def save_progress(self, epoch, net, optimizer, scheduler, mintloss, minvloss):
         """Save training progress"""
@@ -564,8 +575,9 @@ if __name__ == '__main__':
     os.makedirs(model_dir, exist_ok=True)
 
     dataset_name = args.dataset
-    from yacs.config import CfgNode
-    cfg = CfgNode.load_cfg(open('base.yaml'))
+    
+    # 加载配置
+    cfg = get_cfg(dataset_name=dataset_name)
     
     # 从配置文件中获取训练策略参数
     lr = cfg.TRAIN.GEN.get('LR', 0.0001)
@@ -737,6 +749,9 @@ if __name__ == '__main__':
         logger.info(f"Dataset: {dataset_name}")
         logger.info(f"Batch size: {args.bs}, Learning rate: {lr}")
         logger.info(f"Using GPU: {args.gpu if iscuda else 'CPU'}")
+        
+        # 初始化epoch变量，防止在第一个epoch前被中断时未定义
+        epoch = start_epoch
         
         try:
             for epoch in range(start_epoch, args.epochs + 1):
