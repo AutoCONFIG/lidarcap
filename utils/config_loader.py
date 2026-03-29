@@ -15,7 +15,7 @@ def load_config(config_dir: str = 'config') -> Dict[str, Any]:
     """
     config = {}
     
-    config_files = ['train.yaml', 'model.yaml', 'dataset.yaml', 'runtime.yaml']
+    config_files = ['train.yaml', 'runtime.yaml']
     
     for filename in config_files:
         filepath = os.path.join(config_dir, filename)

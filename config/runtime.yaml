@@ -1,21 +1,81 @@
 # 运行时配置
 RUNTIME:
-  # GPU配置
   gpu_id: 0
   num_gpus: 1
-  
-  # 输出目录
   output_dir: './lidarcap_output'
-  
-  # 是否使用内存预加载
   preload: true
-  
-  # 调试模式
   debug: false
-  
-  # 恢复训练
   resume: null
   checkpoint_path: null
-  
-  # 数据集名称
   dataset: 'lidarcap'
+
+# 路径配置
+PATHS:
+  DATA_DIR: 'data'
+  DATASET_DIR: null
+  SMPL_MODEL: 'data/basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
+  SMPL_FACES: 'data/smpl_faces.npy'
+  JOINT_REGRESSOR: 'data/J_regressor_extra.npy'
+  DATASET_CACHE: 'data/dataset_cache'
+  OUTPUT_DIR: 'output'
+
+# 关节索引配置
+JOINTS:
+  INDEX: [8, 5, 29, 30, 4, 7, 21, 19, 17, 16, 18, 20, 31, 32, 33, 34, 35, 36, 37, 24, 26, 25, 28, 27]
+
+# 数据集配置
+TrainDataset:
+  dataset_path: '/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M/lidarcap_train.hdf5'
+  use_aug: false
+  use_rot: false
+  concat_info: false
+  use_straight: false
+  use_pc_w_raw_z: false
+  ret_raw_pc: true
+  seqlen: 16
+  drop_first_n: 0
+  use_trans_to_normalize: true
+  replace_noice_pc: false
+  replace_noice_pc_rate: false
+  replace_pc_strategy: 'random'
+  noise_distribution: 'uniform'
+  add_noice_pc: false
+  set_body_label_all_one: false
+  random_permutation: false
+  use_boundary: false
+  inside_random: false
+  use_sample: false
+  range_image: false
+  range_image_W: 512
+  range_image_H: 512
+  fov_up: 12.5
+  dataset_ids:
+    - lidarcap_train
+
+TestDataset:
+  dataset_path: '/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M/lidarcap_test.hdf5'
+  use_aug: false
+  concat_info: false
+  use_rot: false
+  use_straight: false
+  use_pc_w_raw_z: false
+  ret_raw_pc: true
+  seqlen: 16
+  drop_first_n: 0
+  use_trans_to_normalize: true
+  replace_pc_strategy: 'random'
+  replace_noice_pc: false
+  replace_noice_pc_rate: false
+  noise_distribution: 'uniform'
+  add_noice_pc: false
+  set_body_label_all_one: false
+  random_permutation: false
+  use_boundary: false
+  inside_random: false
+  use_sample: false
+  range_image: false
+  range_image_W: 512
+  range_image_H: 512
+  fov_up: 12.5
+  dataset_ids:
+    - lidarcap_test

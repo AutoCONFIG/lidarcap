@@ -9,7 +9,7 @@ import re
 import sys
 import h5py
 import torch
-import config
+from config import get_cfg
 
 sys.path.append(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
@@ -19,7 +19,8 @@ from modules.smpl import SMPL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 smpl = SMPL().to(device)
 
-ROOT_PATH = config.DATASET_DIR
+_cfg = get_cfg()
+ROOT_PATH = _cfg.PATHS.DATASET_DIR
 MAX_PROCESS_COUNT = 64
 
 # img_filenames = []
@@ -191,7 +192,7 @@ def dump(args):
 
 
 if __name__ == '__main__':
-    extras_path = config.DATASET_DIR
+    extras_path = _cfg.PATHS.DATASET_DIR
     os.makedirs(extras_path, exist_ok=True)
 
     parser = argparse.ArgumentParser()

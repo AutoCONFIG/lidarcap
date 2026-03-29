@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from . import config as cfg
+from config import get_cfg
 
 # 使用pickle context manager抑制NumPy的dtype警告
 class PickleWarningsContext:
@@ -44,8 +44,11 @@ ProjectPoints, ColoredRenderer, LambertianPointLight = None, None, None  # 考�
 
 class SMPL(nn.Module):
 
-    def __init__(self, model_file=cfg.SMPL_FILE):
+    def __init__(self, model_file=None):
         super(SMPL, self).__init__()
+        cfg = get_cfg()
+        if model_file is None:
+            model_file = cfg.PATHS.SMPL_MODEL
         with open(model_file, 'rb') as f:
             with PickleWarningsContext():
                 smpl_model = pickle.load(f, encoding='iso-8859-1')
@@ -77,9 +80,9 @@ class SMPL(nn.Module):
               range(1, self.kintree_table.shape[1])]))
 
         J_regressor_extra = torch.from_numpy(
-            np.load(cfg.JOINT_REGRESSOR_TRAIN_EXTRA)).float()
+            np.load(cfg.PATHS.JOINT_REGRESSOR)).float()
         self.register_buffer('J_regressor_extra', J_regressor_extra)
-        self.joints_idx = cfg.JOINTS_IDX
+        self.joints_idx = cfg.JOINTS.INDEX
         self.requires_grad_(False)
 
     def forward(self, pose, beta):  # return vertices location
@@ -168,7 +171,10 @@ colors = {
 
 class SMPLRenderer(object):
     def __init__(self,
-                 face_path=cfg.SMPL_FACES_FILE):
+                 face_path=None):
+        if face_path is None:
+            cfg = get_cfg()
+            face_path = cfg.PATHS.SMPL_FACES
         self.faces = np.load(face_path)
 
     def __call__(self,

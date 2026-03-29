@@ -1,47 +1,36 @@
 # 训练超参数配置
 TRAIN:
-  # 基本训练参数
   batch_size: 4
   eval_batch_size: 4
   num_epochs: 600
   num_workers: 6
   
-  # 学习率和优化器参数
   learning_rate: 0.0001
   weight_decay: 0.0001
   
-  # 学习率调度器参数（ReduceLROnPlateau）
   scheduler:
     factor: 0.5
     patience: 5
     threshold: 0.001
     min_lr: 1.0e-7
   
-  # 早停机制参数
   early_stopping:
     patience: 30
     min_delta: 0.001
   
-  # 梯度裁剪参数
   grad_clip: null
-  
-  # 混合精度训练
   use_amp: false
   
-  # 学习率预热参数
   warmup:
     epochs: 0
     min_lr: 1.0e-8
   
-  # 检查点保存策略
   checkpoint:
     save_every: 1
     keep_checkpoints: 5
   
-  # 日志配置
   log_interval: 100
   
-  # 其他训练选项
   with_body_label: false
   segment_parallel: false
   use_drop_first: true
@@ -58,3 +47,57 @@ LOSS:
   pose_loss: true
   zmp_loss: false
   bone_loss: false
+
+# 模型架构配置
+DEVICE: 'cuda'
+
+MAMBA:
+  d_model: 1024
+  d_state: 16
+  d_conv: 4
+  expand: 2
+  n_layers: 2
+  dropout: 0.1
+
+TEMPORAL_LOSS:
+  enabled: true
+  weight: 0.1
+  velocity_weight: 1.0
+  acceleration_weight: 0.5
+  bone_length_weight: 0.3
+
+MULTIMODAL:
+  enabled: false
+  rgb_encoder: 'resnet18'
+  fusion_type: 'gcsp'
+
+MODEL:
+  TpointNet2: false
+  Outline: true
+  Outline_boundary: false
+  add_background: false
+  add_twise_noise: false
+  use_project_image: false
+  use_back_wang: false
+  use_transformer: false
+  use_attention: false
+  use_mdmtransformer: false
+
+Transformer:
+  num_hidden_layers: 3
+  hidden_size: 1024
+  num_attention_heads: 2
+  intermediate_size: 512
+  hidden_dropout_prob: 0.1
+
+MDMTransformer:
+  latent_dim: 1536
+  dropout: 0.1
+  num_heads: 4
+  ff_size: 1024
+  activation: 'gelu'
+  num_layers: 8
+  data_rep: 'rot6d'
+  njoints: 24
+  nfeats: 3
+  seqlen: 16
