@@ -749,9 +749,12 @@ class CachedLidarCapDataset(Dataset):
                 boundary_label = self._get_data('boundary_label', l, r) if self._has_key('boundary_label') else None
                 project_image = self._get_data('project_image', l, r) if self._has_key('project_image') else None
 
+                # 加载RGB图像
+                images = self._get_data('images', l, r) if self._has_key('images') else None
+
                 return pose, betas, trans, human_points, points_num, full_joints, \
                        rotmats, lidar_to_mocap_RT, body_label, sample_pc, boundary_label, \
-                       project_image, back_pc, plane_model, twice_noise
+                       project_image, back_pc, plane_model, twice_noise, images
 
         assert False, f'cant find the dataset whose index：{raw_index}'
 
@@ -763,7 +766,7 @@ class CachedLidarCapDataset(Dataset):
         try:
             pose, betas, trans, human_points, points_num, full_joints, rotmats, \
             lidar_to_mocap_RT, body_label, sample_pc, boundary_label, project_image, \
-            back_pc, plane_model, twice_noise = self.access_hdf5(index)
+            back_pc, plane_model, twice_noise, images = self.access_hdf5(index)
         except NotImplementedError as e:
             print(e)
             print(f'[ERROR] access_hdf5 error, index is {index}')
@@ -914,6 +917,8 @@ class CachedLidarCapDataset(Dataset):
             item['back_pc'] = torch.from_numpy(back_pc).float()
         if twice_noise is not None:
             item['twice_noise'] = torch.from_numpy(twice_noise).float()
+        if images is not None:
+            item['images'] = torch.from_numpy(images).byte()  # RGB图像
 
         if plane_model is not None:
             item['plane_model'] = torch.from_numpy(plane_model).float()

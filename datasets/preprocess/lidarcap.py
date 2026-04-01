@@ -9,19 +9,21 @@ import re
 import sys
 import h5py
 import torch
-from config import get_cfg
+from PIL import Image
 
-sys.path.append(os.path.dirname(os.path.dirname(
+# 先添加项目根目录到路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
+
+from config import get_cfg
 from tools import multiprocess
 from modules.smpl import SMPL
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 smpl = SMPL().to(device)
 
-_cfg = get_cfg()
-ROOT_PATH = _cfg.PATHS.DATASET_DIR
 MAX_PROCESS_COUNT = 64
+ROOT_PATH = None  # 将在main中设置
 
 # img_filenames = []
 
@@ -105,6 +107,25 @@ def foo(id, args):
         read_ply, MAX_PROCESS_COUNT, len(segment_filenames),
         'Load segment files', True, segment_filenames)
 
+    # 加载RGB图像 (统一resize到固定尺寸)
+    IMG_SIZE = 128  # 统一图像尺寸
+    image_filenames = get_sorted_filenames_by_index(
+        os.path.join(ROOT_PATH, 'images', id))
+    cur_images = []
+    for img_path in image_filenames:
+        img = Image.open(img_path).convert('RGB')
+        img = img.resize((IMG_SIZE, IMG_SIZE), Image.BILINEAR)
+        cur_images.append(np.array(img))
+
+    # 检查图像数量与标注数量是否匹配
+    if len(cur_images) != len(cur_betas):
+        print(f"[WARNING] ID {id}: 图像数量({len(cur_images)}) != 标注数量({len(cur_betas)})")
+        # 用黑色图像填充缺失的帧
+        while len(cur_images) < len(cur_betas):
+            cur_images.append(np.zeros((IMG_SIZE, IMG_SIZE, 3), dtype=np.uint8))
+        # 如果图像多于标注，截断
+        cur_images = cur_images[:len(cur_betas)]
+
     cur_points_nums = [min(args.npoints, points.shape[0])
                        for points in cur_point_clouds]
     cur_point_clouds = [fix_points_num(
@@ -118,6 +139,7 @@ def foo(id, args):
     point_clouds = []
     depths = []
     full_joints = []
+    images = []
 
     n = len(cur_betas)
     for i in range(n):
@@ -126,12 +148,13 @@ def foo(id, args):
         trans.append(cur_trans[i])
         point_clouds.append(cur_point_clouds[i])
         points_nums.append(cur_points_nums[i])
+        images.append(cur_images[i])
 
         np_pose = np.stack([cur_poses[i]])
         full_joints.append(smpl.get_full_joints(smpl(torch.from_numpy(
             np_pose).to(device), torch.zeros((1, 10)).to(device))).cpu().numpy()[0])
 
-    return np.array(poses), np.array(betas), np.array(trans), np.array(point_clouds), np.array(points_nums), cur_depths, np.array(full_joints)
+    return np.array(poses), np.array(betas), np.array(trans), np.array(point_clouds), np.array(points_nums), cur_depths, np.array(full_joints), np.array(images)
 
 
 def test(args):
@@ -160,10 +183,11 @@ def dump(args):
     whole_points_nums = np.zeros((0,))
     whole_full_joints = np.zeros((0, 24, 3))
     whole_depths = []
+    whole_images = None  # RGB images, 延迟初始化以获取正确尺寸
 
     for id in ids:
         # poses, betas, trans, vertices, point_clouds, points_nums = foo(
-        poses, betas, trans, point_clouds, points_nums, depths, full_joints = foo(
+        poses, betas, trans, point_clouds, points_nums, depths, full_joints, images = foo(
             id, args)
 
         whole_poses = np.concatenate((whole_poses, poses))
@@ -179,6 +203,11 @@ def dump(args):
         whole_full_joints = np.concatenate(
             (whole_full_joints, full_joints))
 
+        if whole_images is None:
+            whole_images = images
+        else:
+            whole_images = np.concatenate((whole_images, images))
+
     whole_filename = args.name + '.hdf5'
     with h5py.File(os.path.join(ROOT_PATH, whole_filename), 'w') as f:
         f.create_dataset('pose', data=whole_poses)
@@ -189,13 +218,15 @@ def dump(args):
         f.create_dataset('points_num', data=whole_points_nums)
         f.create_dataset('depth', data=whole_depths)
         f.create_dataset('full_joints', data=whole_full_joints)
+        f.create_dataset('images', data=whole_images)
+        print(f"[INFO] 保存RGB图像: shape={whole_images.shape}")
 
 
 if __name__ == '__main__':
-    extras_path = _cfg.PATHS.DATASET_DIR
-    os.makedirs(extras_path, exist_ok=True)
-
     parser = argparse.ArgumentParser()
+    parser.add_argument('--output_dir', type=str,
+                       default='/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M',
+                       help='输出目录')
     subparser = parser.add_subparsers()
 
     parser_dump = subparser.add_parser('dump')
@@ -209,4 +240,9 @@ if __name__ == '__main__':
     parser_test.set_defaults(func=test)
 
     args = parser.parse_args()
+
+    # 设置ROOT_PATH (使用globals()避免global声明问题)
+    globals()['ROOT_PATH'] = args.output_dir
+    os.makedirs(args.output_dir, exist_ok=True)
+
     args.func(args)

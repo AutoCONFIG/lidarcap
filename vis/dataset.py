@@ -6,12 +6,14 @@
 2. 可视化关节点骨架
 3. 可视化SMPL网格
 4. 支持交互式查看和保存图片
+5. 交互式序列播放 (播放/暂停, 进度拖动, 视角旋转)
 
 运行方式:
     # 使用启动脚本（推荐）
     bash scripts/vis_dataset.sh single     # 可视化单帧
     bash scripts/vis_dataset.sh sequence   # 可视化序列
-    bash scripts/vis_dataset.sh animation  # 生成动画
+    bash scripts/vis_dataset.sh animation  # 生成动画GIF
+    bash scripts/vis_dataset.sh interactive # 交互式播放
     bash scripts/vis_dataset.sh stats      # 查看统计
 
     # 或直接运行
@@ -27,11 +29,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.widgets import Slider, Button
+from matplotlib.animation import FuncAnimation
 import argparse
 from tqdm import tqdm
 
 from config import get_cfg
-from datasets.lidarcap_dataset import TemporalDataset, CachedLidarCapDataset
+from datasets.lidarcap_dataset import CachedLidarCapDataset
 
 
 # SMPL骨骼连接定义 (24关节)
@@ -101,19 +105,12 @@ class DatasetVisualizer:
         else:
             dataset_cfg = self.cfg.TestDataset
 
-        if preload:
-            self.dataset = CachedLidarCapDataset(
-                cfg=dataset_cfg,
-                dataset=self.cfg.RUNTIME.dataset,
-                train=(split == 'train'),
-                preload=True
-            )
-        else:
-            self.dataset = TemporalDataset(
-                cfg=dataset_cfg,
-                dataset=self.cfg.RUNTIME.dataset,
-                train=(split == 'train')
-            )
+        self.dataset = CachedLidarCapDataset(
+            cfg=dataset_cfg,
+            dataset=self.cfg.RUNTIME.dataset,
+            train=(split == 'train'),
+            preload=preload
+        )
 
         print(f"[INFO] 数据集大小: {len(self.dataset)} 个序列")
         print(f"[INFO] 序列长度: {self.cfg.TrainDataset.seqlen} 帧")
@@ -321,6 +318,148 @@ class DatasetVisualizer:
         print(f"[INFO] 保存动画: {save_path}")
         plt.close()
 
+    def visualize_interactive(self, index):
+        """
+        交互式序列可视化
+
+        功能:
+        - 自动播放序列
+        - 播放/暂停按钮
+        - 进度滑块拖动
+        - 3D视角旋转
+        - RGB图像同步显示
+
+        Args:
+            index: 样本索引
+        """
+        sample = self.get_sample(index)
+        human_points = sample['human_points'].numpy()  # (T, N, 3)
+        full_joints = sample['full_joints'].numpy()    # (T, 24, 3)
+        T = human_points.shape[0]
+
+        # 检查是否有RGB图像
+        has_images = 'images' in sample
+        if has_images:
+            images = sample['images'].numpy()  # (T, H, W, 3)
+
+        # 创建图形和子图
+        if has_images:
+            fig = plt.figure(figsize=(18, 10))
+            ax_rgb = fig.add_subplot(141)
+            ax_pc = fig.add_subplot(142, projection='3d')
+            ax_skel = fig.add_subplot(143, projection='3d')
+            ax_overlay = fig.add_subplot(144, projection='3d')
+        else:
+            fig = plt.figure(figsize=(16, 10))
+            ax_pc = fig.add_subplot(131, projection='3d')
+            ax_skel = fig.add_subplot(132, projection='3d')
+            ax_overlay = fig.add_subplot(133, projection='3d')
+
+        fig.suptitle(f'Interactive Visualization - Sample {index}', fontsize=14, fontweight='bold')
+
+        # 调整布局，为底部控件留空间
+        plt.subplots_adjust(bottom=0.2, top=0.92)
+
+        # 状态变量
+        state = {'frame': 0, 'playing': True, 'views': {'elev': 20, 'azim': 45}}
+
+        def draw_frame(frame_idx):
+            """绘制指定帧"""
+            ax_pc.clear()
+            ax_skel.clear()
+            ax_overlay.clear()
+
+            pts = human_points[frame_idx]
+            joints = full_joints[frame_idx]
+
+            # RGB图像
+            if has_images:
+                ax_rgb.clear()
+                ax_rgb.imshow(images[frame_idx])
+                ax_rgb.set_title(f'RGB Image\nFrame {frame_idx}/{T-1}')
+                ax_rgb.axis('off')
+
+            # 点云
+            ax_pc.scatter(pts[:, 0], pts[:, 1], pts[:, 2], s=2, c='blue', alpha=0.5)
+            ax_pc.set_title(f'Point Cloud\n({pts.shape[0]} pts)')
+            self._set_axis_equal(ax_pc, pts)
+            ax_pc.view_init(elev=state['views']['elev'], azim=state['views']['azim'])
+
+            # 骨架
+            self._draw_skeleton(ax_skel, joints, title=f'Skeleton\nFrame {frame_idx}')
+            ax_skel.view_init(elev=state['views']['elev'], azim=state['views']['azim'])
+
+            # 叠加
+            ax_overlay.scatter(pts[:, 0], pts[:, 1], pts[:, 2], s=1, c='blue', alpha=0.3)
+            self._draw_skeleton(ax_overlay, joints, title='Overlay')
+            ax_overlay.view_init(elev=state['views']['elev'], azim=state['views']['azim'])
+
+            fig.canvas.draw_idle()
+
+        # 初始绘制
+        draw_frame(0)
+
+        # 滑块
+        ax_slider = plt.axes([0.2, 0.08, 0.6, 0.03])
+        slider = Slider(ax_slider, 'Frame', 0, T-1, valinit=0, valstep=1)
+
+        # 播放/暂停按钮
+        ax_play = plt.axes([0.35, 0.02, 0.1, 0.04])
+        btn_play = Button(ax_play, 'Pause')
+
+        # 重置按钮
+        ax_reset = plt.axes([0.55, 0.02, 0.1, 0.04])
+        btn_reset = Button(ax_reset, 'Reset')
+
+        def on_slider_change(val):
+            state['frame'] = int(val)
+            draw_frame(state['frame'])
+
+        def on_play_click(event):
+            state['playing'] = not state['playing']
+            btn_play.label.set_text('Play' if not state['playing'] else 'Pause')
+
+        def on_reset_click(event):
+            state['frame'] = 0
+            state['playing'] = True
+            state['views'] = {'elev': 20, 'azim': 45}
+            slider.set_val(0)
+            btn_play.label.set_text('Pause')
+            draw_frame(0)
+
+        def on_mouse_move(event):
+            """鼠标拖动旋转视角"""
+            if event.inaxes in [ax_pc, ax_skel, ax_overlay] and event.button == 1:
+                # 左键拖动旋转
+                pass  # matplotlib 3D axes already support rotation
+
+        slider.on_changed(on_slider_change)
+        btn_play.on_clicked(on_play_click)
+        btn_reset.on_clicked(on_reset_click)
+
+        def animate():
+            """动画更新函数"""
+            if state['playing']:
+                state['frame'] = (state['frame'] + 1) % T
+                slider.set_val(state['frame'])
+            # 同步视角
+            for ax in [ax_pc, ax_skel, ax_overlay]:
+                state['views']['elev'] = ax.elev
+                state['views']['azim'] = ax.azim
+
+        # 创建定时器
+        timer = fig.canvas.new_timer(interval=100)  # 100ms = 10fps
+        timer.add_callback(animate)
+        timer.start()
+
+        print("[INFO] 交互式可视化")
+        print("  - 拖动滑块切换帧")
+        print("  - 点击 Pause/Play 控制播放")
+        print("  - 鼠标拖动3D图旋转视角")
+        print("  - 关闭窗口退出")
+
+        plt.show()
+
     def visualize_dataset_statistics(self, num_samples=100, save_path=None):
         """
         可视化数据集统计信息
@@ -475,8 +614,8 @@ class DatasetVisualizer:
 def main():
     parser = argparse.ArgumentParser(description='数据集可视化工具')
     parser.add_argument('--mode', type=str, default='single',
-                       choices=['single', 'sequence', 'animation', 'stats'],
-                       help='可视化模式: single(单帧), sequence(序列), animation(动画), stats(统计)')
+                       choices=['single', 'sequence', 'animation', 'interactive', 'stats'],
+                       help='可视化模式: single(单帧), sequence(序列), animation(动画), interactive(交互式), stats(统计)')
     parser.add_argument('--split', type=str, default='train',
                        choices=['train', 'test'],
                        help='数据集划分')
@@ -511,6 +650,10 @@ def main():
         # 动画可视化
         save_path = os.path.join(args.output, f'animation_{args.index}.gif')
         visualizer.visualize_animation(args.index, save_path)
+
+    elif args.mode == 'interactive':
+        # 交互式可视化
+        visualizer.visualize_interactive(args.index)
 
     elif args.mode == 'stats':
         # 统计可视化
