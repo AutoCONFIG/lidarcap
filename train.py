@@ -498,68 +498,46 @@ class WarmupScheduler:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-
-    # bs
-    parser.add_argument('--bs', type=int, default=16,
-                        help='input batch size for training (default: 16)')
-    parser.add_argument('--eval_bs', type=int, default=16,
-                        help='input batch size for evaluation')
-    # threads
-    parser.add_argument('--threads', type=int, default=4,
-                        help='Number of threads (default: 4)')
-    # gpu
-    parser.add_argument('--gpu', type=int,
-                        default=[0], help='-1 for CPU', nargs='+')
-    # epochs
-    parser.add_argument('--epochs', type=int, default=200,
-                        help='Training epochs (default: 200)')
-    parser.add_argument('--log_interval', type=int, default=100,
-                        help='Log interval (default: 100)')
-    # dataset
-    parser.add_argument("--dataset", type=str, required=True)
-    # debug
-    parser.add_argument('--debug', action='store_true', help='For debug mode')
-
-    # extra things, ignored
-    parser.add_argument('--ckpt_path', type=str, default=None,
-                        help='the saved ckpt needed to be evaluated or visualized')
-
-    # output directory
-    parser.add_argument('--output_dir', type=str, default='output',
-                        help='output directory for models and results')
     
-    # resume training
-    parser.add_argument('--resume', type=str, default=None,
-                        help='path to the run directory to resume training from (e.g., output/run_1234567890)')
-    parser.add_argument('--preload', action='store_true',
-                        help='preload dataset to memory for faster reading (requires more RAM)')
+    parser.add_argument('--config-dir', type=str, default='config',
+                        help='配置文件目录 (default: config)')
     
-
     args = parser.parse_args()
-
-    iscuda = common.torch_set_gpu(args.gpu)
+    
+    cfg = get_cfg()
+    
+    batch_size = cfg.TRAIN.batch_size
+    eval_batch_size = cfg.TRAIN.eval_batch_size
+    num_epochs = cfg.TRAIN.num_epochs
+    num_workers = cfg.TRAIN.num_workers
+    log_interval = cfg.TRAIN.log_interval
+    dataset_name = cfg.RUNTIME.dataset
+    debug = cfg.RUNTIME.debug
+    resume = cfg.RUNTIME.resume
+    ckpt_path = cfg.RUNTIME.checkpoint_path
+    preload = cfg.RUNTIME.preload
+    output_dir = cfg.RUNTIME.output_dir
+    gpu_id = cfg.RUNTIME.gpu_id
+    
+    iscuda = common.torch_set_gpu([gpu_id])
     common.make_reproducible(iscuda, 0)
 
     # Handle resume or create new run
-    if args.resume:
-        # Resume from existing run
-        if not os.path.exists(args.resume):
-            raise ValueError(f"Resume path does not exist: {args.resume}")
-        run_dir = args.resume
+    if resume:
+        if not os.path.exists(resume):
+            raise ValueError(f"Resume path does not exist: {resume}")
+        run_dir = resume
         run_id = os.path.basename(run_dir)
         print(f"Resuming training from {run_dir}")
     else:
-        # Create new run
         run_id = f"run_{datetime.datetime.now().strftime('%Y%m%d%H%M')}"
-        run_dir = os.path.join(args.output_dir, run_id)
+        run_dir = os.path.join(output_dir, run_id)
         print(f"Starting new training run: {run_id}")
     
-    # Setup logger with log directory
     log_dir = os.path.join(run_dir, 'logs')
-    logger = setup_logger(log_dir, args.debug)
+    logger = setup_logger(log_dir, debug)
     
-    # Log run information
-    if args.resume:
+    if resume:
         logger.info(f"=== RESUMING TRAINING ===")
         logger.info(f"Resume directory: {run_dir}")
     else:
@@ -567,19 +545,15 @@ if __name__ == '__main__':
         logger.info(f"Run ID: {run_id}")
         logger.info(f"Output directory: {run_dir}")
     
-    logger.info(f"Arguments: {vars(args)}")
+    logger.info(f"Configuration loaded from: {args.config_dir}")
     logger.info(f"Log files saved to: {log_dir}")
     
-    # model save models in training
     model_dir = os.path.join(run_dir, 'model')
     os.makedirs(model_dir, exist_ok=True)
-
-    dataset_name = args.dataset
     
     # 加载配置
     cfg = get_cfg()
     
-    # 从配置文件中获取训练策略参数
     lr = cfg.TRAIN.learning_rate
     lr_patience = cfg.TRAIN.scheduler.patience
     lr_factor = cfg.TRAIN.scheduler.factor
@@ -598,20 +572,19 @@ if __name__ == '__main__':
     save_every = cfg.TRAIN.checkpoint.save_every
     keep_checkpoints = cfg.TRAIN.checkpoint.keep_checkpoints
     
-    # Load training and validation data
-    if args.preload:
+    if preload:
         print("[INFO] Using CachedLidarCapDataset with preload=True for faster data loading")
         train_dataset = CachedLidarCapDataset(cfg=cfg.TrainDataset, dataset=dataset_name, train=True, preload=True)
     else:
         train_dataset = TemporalDataset(cfg=cfg.TrainDataset, dataset=dataset_name, train=True)
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.bs, shuffle=True, num_workers=args.threads, pin_memory=True, collate_fn=collate)
-    if args.preload:
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True, collate_fn=collate)
+    if preload:
         valid_dataset = CachedLidarCapDataset(cfg=cfg.TestDataset, dataset=dataset_name, train=False, preload=True)
     else:
         valid_dataset = TemporalDataset(cfg=cfg.TestDataset, dataset=dataset_name, train=False)
     valid_loader = torch.utils.data.DataLoader(
-        valid_dataset, batch_size=args.eval_bs, shuffle=False, num_workers=args.threads, pin_memory=True, collate_fn=collate)
+        valid_dataset, batch_size=eval_batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, collate_fn=collate)
     loader = {'Train': train_loader, 'Valid': valid_loader}
 
     # Initialize async checkpoint saver for non-blocking model saves
@@ -655,10 +628,9 @@ if __name__ == '__main__':
         )
         logger.info(f"Early stopping enabled: patience={early_stopping_patience}, min_delta={early_stopping_min_delta}")
     
-    # 记录训练配置
     logger.info("=== 训练配置 ===")
     logger.info(f"学习率: {lr}")
-    logger.info(f"批次大小: {args.bs}")
+    logger.info(f"批次大小: {batch_size}")
     logger.info(f"权重衰减: 1e-4")
     logger.info(f"学习率调度器: ReduceLROnPlateau(factor={sc['factor']}, patience={sc['patience']}, min_lr={sc['min_lr']})")
     if warmup_scheduler:
@@ -671,29 +643,23 @@ if __name__ == '__main__':
     # Initialize training manager
     training_manager = TrainingProgressTracker(model_dir, logger)
     
-    # Initialize training variables
     start_epoch = 1
     mintloss = float('inf')
     minvloss = float('inf')
     
-    # Load checkpoint if resuming or if ckpt_path is provided
-    if args.resume:
+    if resume:
         checkpoint = training_manager.load_progress(iscuda)
         if checkpoint:
-            # Load model state
             net.load_state_dict(checkpoint['model_state_dict'])
             
-            # Move model to GPU first if using CUDA
-            train = MyTrainer(net, loader, loss, optimizer, args.log_interval,
+            train = MyTrainer(net, loader, loss, optimizer, log_interval,
                              use_amp=use_amp, grad_clip=grad_clip)
             if iscuda:
                 train = train.cuda()
             
-            # Load optimizer and scheduler state after moving model to GPU
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             
-            # 修复：确保scheduler的min_lrs是float类型而不是str
             for i in range(len(scheduler.min_lrs)):
                 scheduler.min_lrs[i] = float(scheduler.min_lrs[i])
             
@@ -702,61 +668,55 @@ if __name__ == '__main__':
             minvloss = checkpoint['minvloss']
             logger.info(f"Resumed from epoch {checkpoint['epoch']}, starting epoch {start_epoch}")
             
-            # Show training history
             history = training_manager.get_training_history()
             if history:
                 logger.info("Training history:")
-                for result in history[-5:]:  # Show last 5 epochs
+                for result in history[-5:]:
                     logger.info(f"  Epoch {result['epoch']}: Train={result['train_loss']:.6f}, Val={result['val_loss']:.6f}")
         else:
-            # Instance trainer normally if no checkpoint
-            train = MyTrainer(net, loader, loss, optimizer, args.log_interval,
+            train = MyTrainer(net, loader, loss, optimizer, log_interval,
                              use_amp=use_amp, grad_clip=grad_clip)
             if iscuda:
                 train = train.cuda()
     
-    elif args.ckpt_path is not None:
-        logger.info(f"Loading checkpoint from {args.ckpt_path}")
-        save_model = torch.load(args.ckpt_path, map_location='cpu' if not iscuda else None)['state_dict']
+    elif ckpt_path is not None:
+        logger.info(f"Loading checkpoint from {ckpt_path}")
+        save_model = torch.load(ckpt_path, map_location='cpu' if not iscuda else None)['state_dict']
         model_dict = net.state_dict()
         state_dict = {k: v for k, v in save_model.items()
                       if k in model_dict.keys()}
         model_dict.update(state_dict)
         net.load_state_dict(model_dict)
         
-        # Instance trainer
-        train = MyTrainer(net, loader, loss, optimizer, args.log_interval,
+        train = MyTrainer(net, loader, loss, optimizer, log_interval,
                          use_amp=use_amp, grad_clip=grad_clip)
         if iscuda:
             train = train.cuda()
     else:
-        # Instance trainer
-        train = MyTrainer(net, loader, loss, optimizer, args.log_interval,
+        train = MyTrainer(net, loader, loss, optimizer, log_interval,
                          use_amp=use_amp, grad_clip=grad_clip)
         if iscuda:
             train = train.cuda()
          
-    # Training loop - execute for all modes (new, resume, or ckpt_path)
-    if args.ckpt_path is not None:
+    if ckpt_path is not None:
         logger.info("=== EVALUATION MODE ===")
-        logger.info(f"Model loaded from {args.ckpt_path}")
+        logger.info(f"Model loaded from {ckpt_path}")
         logger.info("Use evaluation script instead")
     else:
         logger.info("=== TRAINING MODE ===")
-        logger.info(f"Starting training from epoch {start_epoch} to {args.epochs}")
+        logger.info(f"Starting training from epoch {start_epoch} to {num_epochs}")
         logger.info(f"Model directory: {model_dir}")
         logger.info(f"Current best - Train Loss: {mintloss:.6f}, Val Loss: {minvloss:.6f}")
         logger.info(f"Dataset: {dataset_name}")
-        logger.info(f"Batch size: {args.bs}, Learning rate: {lr}")
-        logger.info(f"Using GPU: {args.gpu if iscuda else 'CPU'}")
+        logger.info(f"Batch size: {batch_size}, Learning rate: {lr}")
+        logger.info(f"Using GPU: {gpu_id if iscuda else 'CPU'}")
         
-        # 初始化epoch变量，防止在第一个epoch前被中断时未定义
         epoch = start_epoch
         
         try:
-            for epoch in range(start_epoch, args.epochs + 1):
+            for epoch in range(start_epoch, num_epochs + 1):
                 epoch_start_time = time.time()
-                logger.info(f"Starting epoch {epoch}/{args.epochs}")
+                logger.info(f"Starting epoch {epoch}/{num_epochs}")
                 logger.info(f"Current learning rate: {optimizer.param_groups[0]['lr']:.8f}")
                 
                 # 应用预热学习率
@@ -779,8 +739,7 @@ if __name__ == '__main__':
                 epoch_time = time.time() - epoch_start_time
                 current_lr = optimizer.param_groups[0]['lr']
                 
-                # Log training progress
-                logger.info(f"Epoch {epoch}/{args.epochs} - "
+                logger.info(f"Epoch {epoch}/{num_epochs} - "
                            f"Train Loss: {train_loss_dict['loss']:.6f}, "
                            f"Val Loss: {val_loss_dict['loss']:.6f}, "
                            f"LR: {current_lr:.8f}, "

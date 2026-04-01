@@ -2,7 +2,7 @@
 RUNTIME:
   gpu_id: 0
   num_gpus: 1
-  output_dir: './lidarcap_output'
+  output_dir: './output'
   preload: true
   debug: false
   resume: null
@@ -25,7 +25,7 @@ JOINTS:
 
 # 数据集配置
 TrainDataset:
-  dataset_path: '/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M/lidarcap_train.hdf5'
+  dataset_path: '/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M/lidarcap_train.hdf5'
   use_aug: false
   use_rot: false
   concat_info: false
@@ -53,7 +53,7 @@ TrainDataset:
     - lidarcap_train
 
 TestDataset:
-  dataset_path: '/media/yun/41306b47-5fbd-4e11-a4f8-13c59e123adf1/lidarhuman26M/lidarcap_test.hdf5'
+  dataset_path: '/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M/lidarcap_test.hdf5'
   use_aug: false
   concat_info: false
   use_rot: false

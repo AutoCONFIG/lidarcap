@@ -11,10 +11,8 @@ echo "LidarCap 训练启动"
 echo "=========================================="
 echo ""
 echo "配置文件: config/"
-echo "  - train.yaml   (训练超参数)"
-echo "  - model.yaml   (模型配置)"
-echo "  - dataset.yaml (数据集配置)"
-echo "  - runtime.yaml (运行时配置)"
+echo "  - train.yaml   (训练超参数 + 模型配置)"
+echo "  - runtime.yaml (运行时配置 + 数据集配置)"
 echo ""
 
 # 执行训练（所有参数从配置文件读取）
