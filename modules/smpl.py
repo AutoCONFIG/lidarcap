@@ -95,7 +95,7 @@ class SMPL(nn.Module):
         v_shaped = torch.matmul(shapedirs, beta).view(-1, 6890, 3) + v_template
         
         # 优化：批量计算J矩阵，避免循环
-        J = torch.einsum('ij,bkj->bki', self.J_regressor, v_shaped)
+        J = torch.einsum('ij,bjk->bik', self.J_regressor, v_shaped)
         
         # input it rotmat: (bs,24,3,3)
         if pose.ndimension() == 4:
@@ -111,7 +111,7 @@ class SMPL(nn.Module):
         posedirs = self.posedirs.view(-1,
                                       207)[None, :].expand(batch_size, -1, -1)
         v_posed = v_shaped + torch.matmul(posedirs, lrotmin[:, :, None]).view(-1, 6890,
-                                                                              3)
+                                                                               3)
         J_ = J.clone()
         J_[:, 1:, :] = J[:, 1:, :] - J[:, self.parent, :]
         G_ = torch.cat([R, J_[:, :, :, None]], dim=-1)
