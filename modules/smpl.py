@@ -11,6 +11,7 @@ import pickle
 import numpy as np
 import torch
 import torch.nn as nn
+import cv2  # 用于旋转变换
 
 from config import get_cfg
 

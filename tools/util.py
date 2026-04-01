@@ -65,10 +65,27 @@ def get_gt_poses(idx):
 
 
 
-def get_pred_poses(filename):
+def get_pred_poses(filename, idx=None):
+    """
+    从文件加载预测的姿态矩阵
+
+    Args:
+        filename: 模型文件名或路径
+        idx: 数据集索引（可选，用于构建完整路径）
+
+    Returns:
+        pred_poses: 预测的姿态数组 (N, 72)
+    """
+    # 如果 filename 不包含路径分隔符，则构建完整路径
+    if idx is not None and '/' not in filename and '\\' not in filename:
+        cfg = _get_cfg()
+        dataset_dir = cfg.PATHS.DATASET_DIR
+        if dataset_dir:
+            filename = os.path.join(dataset_dir, 'predictions', str(idx), filename)
+
     pred_rotmats = np.load(filename).reshape(-1, 24, 3, 3)
     pred_poses = []
-    for pred_rotmat in tqdm(pred_rotmats):
+    for pred_rotmat in tqdm(pred_rotmats, desc=f'Loading {os.path.basename(filename)}'):
         pred_poses.append(rotation_matrix_to_axis_angle(
             torch.from_numpy(pred_rotmat)).numpy().reshape((72, )))
     pred_poses = np.stack(pred_poses)

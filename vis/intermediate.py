@@ -57,10 +57,14 @@ class IntermediateVisualizer:
     
     def get_dataloader(self, seq_idx=0):
         cfg = get_cfg()
-        dataset = CachedLidarCapDataset(cfg, 'test', seq_idx)
+        dataset = CachedLidarCapDataset(
+            cfg=cfg.TestDataset,
+            dataset=cfg.RUNTIME.dataset,
+            train=False
+        )
         dataloader = DataLoader(
-            dataset, 
-            batch_size=1, 
+            dataset,
+            batch_size=1,
             shuffle=False,
             collate_fn=collate,
             num_workers=0

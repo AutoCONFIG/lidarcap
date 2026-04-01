@@ -44,8 +44,14 @@ def augment(points, points_num):  # (T, N, 3), (T, )
     # 随机丢弃，至少保留50个点
     dropout_ratio = np.clip(0, np.random.random() *
                             (1 - 50 / np.min(points_num)), 0.5)
-    drop_idx = np.where(np.random.random((T, N)) <= dropout_ratio)
-    augmented_points[drop_idx] = augmented_points[0][0]
+    if dropout_ratio > 0:
+        dropout_mask = np.random.random((T, N)) <= dropout_ratio
+        # 使用第一个有效点替换被丢弃的点，避免索引越界
+        for t in range(T):
+            valid_indices = np.where(~dropout_mask[t])[0]
+            if len(valid_indices) > 0:
+                fill_value = augmented_points[t, valid_indices[0]]
+                augmented_points[t, dropout_mask[t]] = fill_value
 
     # 高斯噪声
     jittered_points = np.clip(
@@ -75,12 +81,12 @@ class TemporalDataset(Dataset):
         'ret_raw_pc': False,
         'seqlen': 16,
         'drop_first_n': 0,
-        'add_noice_pc': False,
-        'noice_pc_scale': 1.5,
+        'add_noise_pc': False,
+        'noise_pc_scale': 1.5,
         'set_body_label_all_one': False,
-        'noice_pc_rate': 1.0,
-        'replace_noice_pc': False,
-        'replace_noice_pc_rate': 0.2,
+        'noise_pc_rate': 1.0,
+        'replace_noise_pc': False,
+        'replace_noise_pc_rate': 0.2,
         'random_permutation': False,
         'use_trans_to_normalize': False,
         'replace_pc_strategy': 'random',
@@ -195,7 +201,7 @@ class TemporalDataset(Dataset):
 
                 back_pc = data['background_m'][l:r] if 'background_m' in data else None
 
-                twice_noice = data['whole_noise'][l:r] if 'whole_noise' in data else None
+                twice_noise = data['whole_noise'][l:r] if 'whole_noise' in data else None
 
                 plane_model = data['plane_model'][l:r] if 'plane_model' in data else None
 
@@ -210,7 +216,7 @@ class TemporalDataset(Dataset):
 
                 return pose, betas, trans, human_points, points_num, full_joints, \
                        rotmats, lidar_to_mocap_RT, body_label, sample_pc, boundary_label, \
-                       project_image, back_pc, plane_model, twice_noice
+                       project_image, back_pc, plane_model, twice_noise
         assert False, f'cant find the dataset whose index：{raw_index}'
 
     def access_hdf5_dataset(self, dataset_id, dataset_key):
@@ -266,16 +272,16 @@ class TemporalDataset(Dataset):
 
     def add_dis_xy(self, P_x_, P_y_, boundary_x_, boundary_y_):
         error_x_index = np.argsort(np.abs(boundary_x_ - P_x_))
-        intial = boundary_y_[error_x_index[0]]
-        range_y = self.get_range(intial, P_y_, boundary_y_, error_x_index)
+        initial = boundary_y_[error_x_index[0]]
+        range_y = self.get_range(initial, P_y_, boundary_y_, error_x_index)
         random_dis = random.uniform(range_y[0], range_y[1])
         return P_y_ + random_dis
 
     def add_dis_z(self, P_x_, P_y_, P_z_, boundary_x_, boundary_y_, boundary_z_):
         error_x_index = np.argsort(
             ((boundary_x_ - P_x_) ** 2 + (boundary_y_ - P_y_) ** 2) ** 0.5)
-        intial = boundary_z_[error_x_index[0]]
-        range_y = self.get_range(intial, P_z_, boundary_z_, error_x_index)
+        initial = boundary_z_[error_x_index[0]]
+        range_y = self.get_range(initial, P_z_, boundary_z_, error_x_index)
         random_dis = random.uniform(range_y[0], range_y[1])
         return P_z_ + random_dis
 
@@ -302,23 +308,23 @@ class TemporalDataset(Dataset):
         if self.cfg.use_sample:
             human_points = sample_pc
 
-        if self.cfg.add_noice_pc:
+        if self.cfg.add_noise_pc:
             assert body_label is None
             unique_pc = [np.unique(seg, axis=0) for seg in human_points]
-            noice_pc = []
+            noise_pc = []
             body_label = []
             for e in unique_pc:
-                numa = int((512 - e.shape[0]) * self.cfg.noice_pc_rate)
+                numa = int((512 - e.shape[0]) * self.cfg.noise_pc_rate)
                 numb = 512 - numa - e.shape[0]
-                noice_pc.append(np.concatenate(
+                noise_pc.append(np.concatenate(
                     (e,
                      e[np.random.choice(np.arange(e.shape[0]), numb)],
-                     (np.random.rand(numa, 3) - 0.5) * self.cfg.noice_pc_scale + e.mean(
+                     (np.random.rand(numa, 3) - 0.5) * self.cfg.noise_pc_scale + e.mean(
                          axis=0, keepdims=True),
                      ), axis=0))
                 body_label.append(
                     np.concatenate((np.ones(512 - numa), np.zeros(numa)), axis=0))
-            human_points = np.stack(noice_pc)
+            human_points = np.stack(noise_pc)
             body_label = np.stack(body_label)
 
         if self.cfg.set_body_label_all_one:
@@ -338,25 +344,25 @@ class TemporalDataset(Dataset):
             points = pc_normalize(human_points.copy())
             # sample_pc_ = pc_normalize(sample_pc.copy())
 
-        if self.cfg.replace_noice_pc and self.cfg.replace_noice_pc_rate > 0:
+        if self.cfg.replace_noise_pc and self.cfg.replace_noise_pc_rate > 0:
             if 'random' == self.cfg.replace_pc_strategy:
-                num_of_noise = int(512 * self.cfg.replace_noice_pc_rate)
+                num_of_noise = int(512 * self.cfg.replace_noise_pc_rate)
                 noise_label = np.zeros((16, 512), dtype=bool)
-                noice_choice = np.random.choice(np.arange(512), num_of_noise,
+                noise_choice = np.random.choice(np.arange(512), num_of_noise,
                                                 replace=False)
                 noise_label[
-                    np.arange(16)[:, np.newaxis], noice_choice[np.newaxis, :]] = True
+                    np.arange(16)[:, np.newaxis], noise_choice[np.newaxis, :]] = True
             elif 'ballquery16' == self.cfg.replace_pc_strategy:
                 ballcenters = points[
                     np.arange(16)[:, np.newaxis], np.random.randint(0, 512, (16, 1))]
                 noise_label = np.linalg.norm(points - ballcenters,
-                                             axis=-1) < self.cfg.replace_noice_pc_rate
+                                             axis=-1) < self.cfg.replace_noise_pc_rate
             elif 'ballquery1' == self.cfg.replace_pc_strategy:
                 ballcenters = points[
                                   np.random.randint(0, 16), np.random.randint(0, 512)][
                               np.newaxis, :]
                 noise_label = np.linalg.norm(points - ballcenters,
-                                             axis=-1) < self.cfg.replace_noice_pc_rate
+                                             axis=-1) < self.cfg.replace_noise_pc_rate
             else:
                 raise NotImplementedError()
 
@@ -364,7 +370,7 @@ class TemporalDataset(Dataset):
                 noise = (np.random.rand(16, 512, 3) - 0.5) * np.array(
                     [0.8, 0.8, 1.2]) + np.array([0, -0.23081176, 0])
             elif 'normal' == self.cfg.noise_distribution:
-                noise = np.random.randn(16, 512, 3) * self.cfg.replace_noice_pc_rate
+                noise = np.random.randn(16, 512, 3) * self.cfg.replace_noise_pc_rate
                 if 'ballquery' in self.cfg.replace_pc_strategy:
                     noise += ballcenters
                 else:
@@ -598,12 +604,12 @@ class CachedLidarCapDataset(Dataset):
         'ret_raw_pc': False,
         'seqlen': 16,
         'drop_first_n': 0,
-        'add_noice_pc': False,
-        'noice_pc_scale': 1.5,
+        'add_noise_pc': False,
+        'noise_pc_scale': 1.5,
         'set_body_label_all_one': False,
-        'noice_pc_rate': 1.0,
-        'replace_noice_pc': False,
-        'replace_noice_pc_rate': 0.2,
+        'noise_pc_rate': 1.0,
+        'replace_noise_pc': False,
+        'replace_noise_pc_rate': 0.2,
         'random_permutation': False,
         'use_trans_to_normalize': False,
         'replace_pc_strategy': 'random',
@@ -732,7 +738,7 @@ class CachedLidarCapDataset(Dataset):
                     body_label = body_fake
 
                 back_pc = self._get_data('background_m', l, r) if self._has_key('background_m') else None
-                twice_noice = self._get_data('whole_noise', l, r) if self._has_key('whole_noise') else None
+                twice_noise = self._get_data('whole_noise', l, r) if self._has_key('whole_noise') else None
                 plane_model = self._get_data('plane_model', l, r) if self._has_key('plane_model') else None
 
                 # 检查数据形状
@@ -745,7 +751,7 @@ class CachedLidarCapDataset(Dataset):
 
                 return pose, betas, trans, human_points, points_num, full_joints, \
                        rotmats, lidar_to_mocap_RT, body_label, sample_pc, boundary_label, \
-                       project_image, back_pc, plane_model, twice_noice
+                       project_image, back_pc, plane_model, twice_noise
 
         assert False, f'cant find the dataset whose index：{raw_index}'
 
@@ -769,23 +775,23 @@ class CachedLidarCapDataset(Dataset):
         if self.cfg.use_sample:
             human_points = sample_pc
 
-        if self.cfg.add_noice_pc:
+        if self.cfg.add_noise_pc:
             assert body_label is None
             unique_pc = [np.unique(seg, axis=0) for seg in human_points]
-            noice_pc = []
+            noise_pc = []
             body_label = []
             for e in unique_pc:
-                numa = int((512 - e.shape[0]) * self.cfg.noice_pc_rate)
+                numa = int((512 - e.shape[0]) * self.cfg.noise_pc_rate)
                 numb = 512 - numa - e.shape[0]
-                noice_pc.append(np.concatenate(
+                noise_pc.append(np.concatenate(
                     (e,
                      e[np.random.choice(np.arange(e.shape[0]), numb)],
-                     (np.random.rand(numa, 3) - 0.5) * self.cfg.noice_pc_scale + e.mean(
+                     (np.random.rand(numa, 3) - 0.5) * self.cfg.noise_pc_scale + e.mean(
                          axis=0, keepdims=True),
                      ), axis=0))
                 body_label.append(
                     np.concatenate((np.ones(512 - numa), np.zeros(numa)), axis=0))
-            human_points = np.stack(noice_pc)
+            human_points = np.stack(noise_pc)
             body_label = np.stack(body_label)
 
         if self.cfg.set_body_label_all_one:
@@ -802,25 +808,25 @@ class CachedLidarCapDataset(Dataset):
         else:
             points = pc_normalize(human_points.copy())
 
-        if self.cfg.replace_noice_pc and self.cfg.replace_noice_pc_rate > 0:
+        if self.cfg.replace_noise_pc and self.cfg.replace_noise_pc_rate > 0:
             if 'random' == self.cfg.replace_pc_strategy:
-                num_of_noise = int(512 * self.cfg.replace_noice_pc_rate)
+                num_of_noise = int(512 * self.cfg.replace_noise_pc_rate)
                 noise_label = np.zeros((16, 512), dtype=bool)
-                noice_choice = np.random.choice(np.arange(512), num_of_noise, replace=False)
-                noise_label[np.arange(16)[:, np.newaxis], noice_choice[np.newaxis, :]] = True
+                noise_choice = np.random.choice(np.arange(512), num_of_noise, replace=False)
+                noise_label[np.arange(16)[:, np.newaxis], noise_choice[np.newaxis, :]] = True
             elif 'ballquery16' == self.cfg.replace_pc_strategy:
                 ballcenters = points[np.arange(16)[:, np.newaxis], np.random.randint(0, 512, (16, 1))]
-                noise_label = np.linalg.norm(points - ballcenters, axis=-1) < self.cfg.replace_noice_pc_rate
+                noise_label = np.linalg.norm(points - ballcenters, axis=-1) < self.cfg.replace_noise_pc_rate
             elif 'ballquery1' == self.cfg.replace_pc_strategy:
                 ballcenters = points[np.random.randint(0, 16), np.random.randint(0, 512)][np.newaxis, :]
-                noise_label = np.linalg.norm(points - ballcenters, axis=-1) < self.cfg.replace_noice_pc_rate
+                noise_label = np.linalg.norm(points - ballcenters, axis=-1) < self.cfg.replace_noise_pc_rate
             else:
                 raise NotImplementedError()
 
             if 'uniform' == self.cfg.noise_distribution:
                 noise = (np.random.rand(16, 512, 3) - 0.5) * np.array([0.8, 0.8, 1.2]) + np.array([0, -0.23081176, 0])
             elif 'normal' == self.cfg.noise_distribution:
-                noise = np.random.randn(16, 512, 3) * self.cfg.replace_noice_pc_rate
+                noise = np.random.randn(16, 512, 3) * self.cfg.replace_noise_pc_rate
                 if 'ballquery' in self.cfg.replace_pc_strategy:
                     noise += ballcenters
                 else:
@@ -926,34 +932,34 @@ class CachedLidarCapDataset(Dataset):
 
     def add_dis_xy(self, P_x_, P_y_, boundary_x_, boundary_y_):
         error_x_index = np.argsort(np.abs(boundary_x_ - P_x_))
-        intial = boundary_y_[error_x_index[0]]
-        range_y = self.get_range(intial, P_y_, boundary_y_, error_x_index)
+        initial = boundary_y_[error_x_index[0]]
+        range_y = self.get_range(initial, P_y_, boundary_y_, error_x_index)
         random_dis = random.uniform(range_y[0], range_y[1])
         return P_y_ + random_dis
 
     def add_dis_z(self, P_x_, P_y_, P_z_, boundary_x_, boundary_y_, boundary_z_):
         error_x_index = np.argsort(
             ((boundary_x_ - P_x_) ** 2 + (boundary_y_ - P_y_) ** 2) ** 0.5)
-        intial = boundary_z_[error_x_index[0]]
-        range_y = self.get_range(intial, P_z_, boundary_z_, error_x_index)
+        initial = boundary_z_[error_x_index[0]]
+        range_y = self.get_range(initial, P_z_, boundary_z_, error_x_index)
         random_dis = random.uniform(range_y[0], range_y[1])
         return P_z_ + random_dis
 
-    def get_range(self, intial, P, boundary, error_index):
+    def get_range(self, initial, P, boundary, error_index):
         if len(error_index) == 0:
             return [0, 0]
-        
+
         for i in range(len(error_index) - 1):
             next_idx = error_index[i + 1]
             if next_idx + 1 >= len(boundary):
                 continue
-            
+
             boundary_val = boundary[next_idx + 1]
-            if intial < P < boundary_val:
-                return [intial - P, boundary_val - P]
-            elif boundary_val < P < intial:
-                return [boundary_val - P, intial - P]
-        
+            if initial < P < boundary_val:
+                return [initial - P, boundary_val - P]
+            elif boundary_val < P < initial:
+                return [boundary_val - P, initial - P]
+
         return [0, 0]
 
     def __len__(self):

@@ -63,14 +63,14 @@ TrainDataset:
                             # 是否使用平移归一化 (以人体中心为原点)
 
   # 噪声处理配置
-  replace_noice_pc: false    # 是否替换部分点为噪声
-  replace_noice_pc_rate: false
+  replace_noise_pc: false    # 是否替换部分点为噪声
+  replace_noise_pc_rate: 0.2
                             # 噪声替换比例
   replace_pc_strategy: 'random'
                             # 噪声替换策略: 'random' / 'ballquery16' / 'ballquery1'
   noise_distribution: 'uniform'
                             # 噪声分布: 'uniform' / 'normal'
-  add_noice_pc: false        # 是否添加噪声点
+  add_noise_pc: false        # 是否添加噪声点
   set_body_label_all_one: false
                             # 是否将身体标签全设为1
   random_permutation: false  # 是否随机打乱点顺序
@@ -108,10 +108,10 @@ TestDataset:
   drop_first_n: 0
   use_trans_to_normalize: true
   replace_pc_strategy: 'random'
-  replace_noice_pc: false
-  replace_noice_pc_rate: false
+  replace_noise_pc: false
+  replace_noise_pc_rate: 0.2
   noise_distribution: 'uniform'
-  add_noice_pc: false
+  add_noise_pc: false
   set_body_label_all_one: false
   random_permutation: false
   use_boundary: false

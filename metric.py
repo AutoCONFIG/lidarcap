@@ -79,13 +79,9 @@ def compute_similarity_transform(S1, S2):
 
     # 4. Solution that Maximizes trace(R'K) is R=U*V', where U, V are
     # singular vectors of K.
-    try:
-        U, s, Vh = torch.linalg.svd(K)
-        V = Vh.T
-    except AttributeError:
-        # PyTorch < 1.9 fallback
-        U, s, V = torch.svd(K)
-    # V = Vh.T
+    U, s, Vh = torch.linalg.svd(K)
+    V = Vh.T
+
     # Construct Z that fixes the orientation of R to get det(R)=1.
     Z = torch.eye(U.shape[0], device=S1.device)
     Z[-1, -1] *= torch.sign(torch.det(U @ V.T))
