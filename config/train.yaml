@@ -1,103 +1,153 @@
+# =============================================================================
 # 训练超参数配置
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 训练基础参数
+# -----------------------------------------------------------------------------
 TRAIN:
-  batch_size: 4
-  eval_batch_size: 4
-  num_epochs: 600
-  num_workers: 6
-  
-  learning_rate: 0.0001
-  weight_decay: 0.0001
-  
+  batch_size: 4              # 训练批次大小，根据GPU显存调整 (显存8GB建议2-4)
+  eval_batch_size: 4         # 验证批次大小，通常与batch_size相同
+  num_epochs: 600            # 最大训练轮数
+  num_workers: 6             # 数据加载线程数，建议设为CPU核心数的一半
+
+  # 学习率相关
+  learning_rate: 0.0001      # 初始学习率，Adam优化器常用1e-4
+  weight_decay: 0.0001       # L2正则化权重衰减，防止过拟合
+
+  # 学习率调度器 (ReduceLROnPlateau)
   scheduler:
-    factor: 0.5
-    patience: 5
-    threshold: 0.001
-    min_lr: 1.0e-7
-  
+    factor: 0.5              # 学习率衰减因子，loss不降时 lr = lr * factor
+    patience: 5              # 容忍轮数，连续N个epoch loss不降则衰减
+    threshold: 0.001         # 认为loss有改善的最小变化量
+    min_lr: 1.0e-7           # 最小学习率，低于此值不再衰减
+
+  # 早停机制
   early_stopping:
-    patience: 27
-    min_delta: 0.0006
-  
-  grad_clip: null
-  use_amp: false
-  
+    patience: 27             # 容忍轮数，连续N个epoch验证loss不降则停止
+    min_delta: 0.0006        # 认为有改善的最小变化量
+
+  # 梯度与精度
+  grad_clip: null            # 梯度裁剪阈值，null表示不裁剪，建议1.0-5.0
+  use_amp: false             # 是否使用混合精度训练，可减少显存但可能影响精度
+
+  # 学习率预热
   warmup:
-    epochs: 0
-    min_lr: 1.0e-8
-  
+    epochs: 0                # 预热轮数，前N个epoch学习率从min_lr线性增加到lr
+    min_lr: 1.0e-8           # 预热起始学习率
+
+  # 检查点保存
   checkpoint:
-    save_every: 1
-    keep_checkpoints: 1000
-  
-  log_interval: 100
-  
-  with_body_label: false
-  segment_parallel: false
-  use_drop_first: true
-  use_denoise: false
-  use_replace_noise: false
-  replace_noise_pc_rate: 0.2
+    save_every: 1            # 每N个epoch保存一次检查点
+    keep_checkpoints: 1000   # 保留最近N个检查点，旧检查点自动删除
 
+  log_interval: 100          # 训练日志打印间隔（按batch计）
+
+  # 数据增强相关
+  with_body_label: false     # 是否使用身体部位标签
+  segment_parallel: false    # 是否并行处理分段
+  use_drop_first: true       # 是否跳过序列前几帧
+  use_denoise: false         # 是否使用去噪
+  use_replace_noise: false   # 是否替换噪声点
+  replace_noise_pc_rate: 0.2 # 噪声点替换比例
+
+# -----------------------------------------------------------------------------
 # 损失函数配置
+# -----------------------------------------------------------------------------
 LOSS:
-  chamfer_loss: false
-  nn_loss: false
-  flow_loss: false
-  end_loss: false
-  pose_loss: true
-  zmp_loss: false
-  bone_loss: false
+  chamfer_loss: false        # 是否启用Chamfer距离损失（点云重建）
+  nn_loss: false             # 是否启用最近邻损失
+  flow_loss: false           # 是否启用光流损失
+  end_loss: false            # 是否启用端点损失
+  pose_loss: true            # 是否启用姿态参数损失（主要损失）
+  zmp_loss: false            # 是否启用零力矩点损失（平衡约束）
+  bone_loss: false           # 是否启用骨骼长度损失
 
-# 模型架构配置
-DEVICE: 'cuda'
+# -----------------------------------------------------------------------------
+# 设备配置
+# -----------------------------------------------------------------------------
+DEVICE: 'cuda'               # 计算设备: 'cuda' 或 'cpu'
 
+# -----------------------------------------------------------------------------
+# Mamba时序模块配置 (创新点1)
+# -----------------------------------------------------------------------------
+# 用Mamba替代GRU实现线性复杂度时序建模
+# -----------------------------------------------------------------------------
 MAMBA:
-  d_model: 1024
-  d_state: 16
-  d_conv: 4
-  expand: 2
-  n_layers: 2
-  dropout: 0.1
+  d_model: 1024              # Mamba隐藏维度，决定模型容量
+  d_state: 16                # 状态空间维度，影响长程依赖建模能力
+  d_conv: 4                  # 卷积核大小，局部上下文窗口
+  expand: 2                  # 扩展因子，内部维度 = d_model * expand
+  n_layers: 2                # Mamba层数，增加可提高表达能力但更慢
+  dropout: 0.1               # Dropout比例，防止过拟合
 
+# -----------------------------------------------------------------------------
+# 时序一致性损失配置 (创新点2)
+# -----------------------------------------------------------------------------
+# 多层次约束运动平滑性，减少帧间抖动
+# -----------------------------------------------------------------------------
 TEMPORAL_LOSS:
-  enabled: true
-  weight: 0.1
-  velocity_weight: 1.0
-  acceleration_weight: 0.5
-  bone_length_weight: 0.3
+  enabled: true              # 是否启用时序一致性损失
+  weight: 0.05               # 时序损失总权重，占总损失5-10%为宜
+                            # 过大会导致动作过平滑，过小则抖动
 
+  velocity_weight: 1.0       # 速度一致性权重 (一阶平滑)
+                            # 约束相邻帧速度变化，防止速度突变
+
+  acceleration_weight: 0.3   # 加速度一致性权重 (二阶平滑)
+                            # 约束加速度变化，减少高频抖动
+                            # 建议设为velocity_weight的30-50%
+
+  bone_length_weight: 0.1    # 骨长一致性权重
+                            # 保持序列中骨骼长度稳定，防止骨骼伸缩变形
+                            # SMPL本身有骨骼约束，此值不宜过大
+
+# -----------------------------------------------------------------------------
+# 多模态融合配置 (创新点3 - 预留接口)
+# -----------------------------------------------------------------------------
+# 预留RGB+LiDAR融合接口，待获取多模态数据集后开发
+# -----------------------------------------------------------------------------
 MULTIMODAL:
-  enabled: false
-  rgb_encoder: 'resnet18'
-  fusion_type: 'gcsp'
+  enabled: false             # 是否启用多模态融合（当前仅LiDAR）
+  rgb_encoder: 'resnet18'    # RGB图像编码器，可选: resnet18/34/50
+  fusion_type: 'gcsp'        # 融合方式: 'gcsp'(门控跨模态) / 'attention'
 
+# -----------------------------------------------------------------------------
+# 模型架构配置
+# -----------------------------------------------------------------------------
 MODEL:
-  TpointNet2: false
-  Outline: true
-  Outline_boundary: false
-  add_background: false
-  add_twise_noise: false
-  use_project_image: false
-  use_back_wang: false
-  use_transformer: false
-  use_attention: false
-  use_mdmtransformer: false
+  TpointNet2: false          # 是否使用T-PointNet2
+  Outline: true              # 是否使用轮廓信息
+  Outline_boundary: false    # 是否使用轮廓边界
+  add_background: false      # 是否添加背景点云
+  add_twise_noise: false     # 是否添加时序噪声
+  use_project_image: false   # 是否使用投影图像
+  use_back_wang: false       # 是否使用背景分支
+  use_transformer: false     # 是否使用Transformer
+  use_attention: false       # 是否使用注意力机制
+  use_mdmtransformer: false  # 是否使用MDM Transformer
 
+# -----------------------------------------------------------------------------
+# Transformer配置 (备用)
+# -----------------------------------------------------------------------------
 Transformer:
-  num_hidden_layers: 3
-  hidden_size: 1024
-  num_attention_heads: 2
-  intermediate_size: 512
-  hidden_dropout_prob: 0.1
+  num_hidden_layers: 3       # Transformer层数
+  hidden_size: 1024          # 隐藏层维度
+  num_attention_heads: 2     # 注意力头数
+  intermediate_size: 512     # FFN中间层维度
+  hidden_dropout_prob: 0.1   # Dropout比例
 
+# -----------------------------------------------------------------------------
+# MDM Transformer配置 (备用)
+# -----------------------------------------------------------------------------
 MDMTransformer:
-  latent_dim: 1536
-  dropout: 0.1
-  num_heads: 4
-  ff_size: 1024
-  activation: 'gelu'
-  num_layers: 8
-  data_rep: 'rot6d'
-  njoints: 24
-  nfeats: 3
-  seqlen: 16
+  latent_dim: 1536           # 潜在空间维度
+  dropout: 0.1               # Dropout比例
+  num_heads: 4               # 注意力头数
+  ff_size: 1024              # FFN隐藏层维度
+  activation: 'gelu'         # 激活函数
+  num_layers: 8              # 层数
+  data_rep: 'rot6d'          # 数据表示方式: 'rot6d' / 'rotmat'
+  njoints: 24                # 关节数量 (SMPL标准)
+  nfeats: 3                  # 每个关节的特征维度
+  seqlen: 16                 # 序列长度

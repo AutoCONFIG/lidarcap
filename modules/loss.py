@@ -5,6 +5,7 @@ from modules.smpl import SMPL, get_smpl_model
 from modules.geometry import axis_angle_to_rotation_matrix
 from libs.chamfer_dist import ChamferDistanceL1
 from pointnet2_ops import pointnet2_utils
+from config import get_cfg
 
 
 def batch_pc_normalize(pc):
@@ -23,16 +24,22 @@ class TemporalConsistencyLoss(nn.Module):
         self.velocity_weight = velocity_weight
         self.acceleration_weight = acceleration_weight
         self.bone_length_weight = bone_length_weight
-        
+
+        # SMPL骨骼连接对（基于标准SMPL 24关节）
+        # 格式: (父关节, 子关节)
         self.skeleton_pairs = [
-            (0, 1), (0, 2), (0, 3),
-            (1, 4), (2, 5), (3, 6),
-            (4, 7), (5, 8), (6, 9),
-            (7, 10), (8, 11), (9, 12),
-            (0, 13), (0, 16),
-            (13, 14), (14, 15),
-            (16, 17), (17, 18),
-            (15, 19), (15, 20), (18, 21), (18, 22)
+            # 脊柱
+            (0, 1), (0, 2), (0, 3),      # 根节点到髋部
+            (1, 4), (2, 5), (3, 6),      # 髋部到大腿
+            (4, 7), (5, 8), (6, 9),      # 大腿到小腿
+            (7, 10), (8, 11), (9, 12),   # 小腿到脚踝
+            # 左臂
+            (13, 14), (14, 15),          # 肩->肘->腕
+            # 右臂
+            (16, 17), (17, 18),          # 肩->肘->腕
+            # 手部
+            (15, 19), (15, 20),          # 左手
+            (18, 21), (18, 22),          # 右手
         ]
     
     def forward(self, joints):
@@ -70,21 +77,33 @@ class TemporalConsistencyLoss(nn.Module):
 
 class Loss(nn.Module):
     _smpl_instance = None  # 类级别的SMPL单例
-    
-    def __init__(self, temporal_weight=0.1):
+
+    def __init__(self, cfg=None):
         super().__init__()
+
+        # 从配置文件读取参数
+        if cfg is None:
+            cfg = get_cfg()
+
+        temporal_cfg = cfg.TEMPORAL_LOSS
+
         self.criterion_param = nn.MSELoss()
         self.criterion_joints = nn.MSELoss()
         self.criterion_vertices = nn.MSELoss()
         self.chamfer_loss = ChamferDistanceL1()
-        
+
         # 使用单例SMPL模型
         if Loss._smpl_instance is None:
             Loss._smpl_instance = SMPL()
         self.smpl = Loss._smpl_instance
-        
-        self.temporal_loss = TemporalConsistencyLoss()
-        self.temporal_weight = temporal_weight
+
+        # 从配置文件读取时序损失参数
+        self.temporal_loss = TemporalConsistencyLoss(
+            velocity_weight=temporal_cfg.velocity_weight,
+            acceleration_weight=temporal_cfg.acceleration_weight,
+            bone_length_weight=temporal_cfg.bone_length_weight
+        )
+        self.temporal_weight = temporal_cfg.weight
 
     def forward(self, **kw):
         B, T = kw['human_points'].shape[:2]

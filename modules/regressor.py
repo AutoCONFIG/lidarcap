@@ -14,6 +14,8 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config import get_cfg
+
 def fps(pc, num):
     fps_idx = pointnet2_utils.furthest_point_sample(pc, num) 
     sub_pc = pointnet2_utils.gather_operation(pc.transpose(1, 2).contiguous(), fps_idx).transpose(1,2).contiguous()
@@ -123,15 +125,25 @@ class PointNet2Encoder(nn.Module):
         return features
 
 class Regressor(nn.Module):
-    def __init__(self):
+    def __init__(self, cfg=None):
         super().__init__()
+
+        # 从配置文件读取参数
+        if cfg is None:
+            cfg = get_cfg()
+
+        mamba_cfg = cfg.MAMBA
+
         self.encoder = PointNet2Encoder()
         self.pose_s1 = MambaTemporal(
             n_input=1024 + 384,
             n_output=24 * 3,
-            d_model=1024,
-            d_state=16,
-            n_layers=2
+            d_model=mamba_cfg.d_model,
+            d_state=mamba_cfg.d_state,
+            d_conv=mamba_cfg.d_conv,
+            expand=mamba_cfg.expand,
+            n_layers=mamba_cfg.n_layers,
+            dropout=mamba_cfg.dropout
         )
         self.pose_s2 = STGCN(3 + 1024 + 384)
         self.pointr = PoinTr(

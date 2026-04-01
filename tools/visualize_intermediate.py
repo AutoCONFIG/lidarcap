@@ -32,14 +32,14 @@ class IntermediateVisualizer:
         
     def load_model(self, model_path):
         cfg = get_cfg()
-        model = Regressor()
-        
+        model = Regressor(cfg=cfg)
+
         checkpoint = torch.load(model_path, map_location=self.device)
         if 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
             model.load_state_dict(checkpoint)
-        
+
         model = model.to(self.device)
         model.eval()
         return model

@@ -1,59 +1,103 @@
+# =============================================================================
 # 运行时配置
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 运行时基础设置
+# -----------------------------------------------------------------------------
 RUNTIME:
-  gpu_id: 0
-  num_gpus: 1
-  output_dir: './output'
-  preload: true
-  debug: false
-  resume: null
-  checkpoint_path: null
-  dataset: 'lidarcap'
+  gpu_id: 0                  # GPU设备ID，多卡时可指定使用哪张卡
+  num_gpus: 1                # 使用的GPU数量
+  output_dir: './output'     # 输出目录，存放训练结果和日志
+  preload: true              # 是否预加载数据集到内存，加速数据读取
+  debug: false               # 调试模式，启用后输出更多日志信息
+  resume: null               # 恢复训练路径，指定输出目录可继续训练
+                            # 例: './output/run_202604011200'
+  checkpoint_path: null      # 加载预训练模型路径，用于迁移学习或评估
+  dataset: 'lidarcap'        # 数据集名称
 
+# -----------------------------------------------------------------------------
 # 路径配置
+# -----------------------------------------------------------------------------
 PATHS:
-  DATA_DIR: 'data'
-  DATASET_DIR: null
+  DATA_DIR: 'data'           # 数据根目录
+  DATASET_DIR: null          # 数据集目录，null时使用TrainDataset/TestDataset中的路径
   SMPL_MODEL: 'data/basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
+                            # SMPL模型文件路径
   SMPL_FACES: 'data/smpl_faces.npy'
+                            # SMPL面片索引文件
   JOINT_REGRESSOR: 'data/J_regressor_extra.npy'
+                            # 关节回归器文件
   DATASET_CACHE: 'data/dataset_cache'
-  OUTPUT_DIR: 'output'
+                            # 数据集缓存目录
+  OUTPUT_DIR: 'output'       # 输出目录
 
+# -----------------------------------------------------------------------------
 # 关节索引配置
+# -----------------------------------------------------------------------------
+# SMPL 24关节到特定任务关节的映射索引
+# -----------------------------------------------------------------------------
 JOINTS:
   INDEX: [8, 5, 29, 30, 4, 7, 21, 19, 17, 16, 18, 20, 31, 32, 33, 34, 35, 36, 37, 24, 26, 25, 28, 27]
 
-# 数据集配置
+# -----------------------------------------------------------------------------
+# 训练数据集配置
+# -----------------------------------------------------------------------------
 TrainDataset:
   dataset_path: '/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M/lidarcap_train.hdf5'
-  use_aug: false
-  use_rot: false
-  concat_info: false
-  use_straight: false
-  use_pc_w_raw_z: false
-  ret_raw_pc: true
-  seqlen: 16
-  drop_first_n: 0
+                            # HDF5数据集文件路径 (需修改为实际路径)
+
+  # 数据增强选项
+  use_aug: false             # 是否使用数据增强 (缩放、丢弃、噪声)
+  use_rot: false             # 是否使用旋转变换
+  use_straight: false        # 是否使用直立化处理
+  use_pc_w_raw_z: false      # 是否保留原始Z坐标
+  ret_raw_pc: true           # 是否返回原始点云
+
+  # 序列配置
+  seqlen: 16                 # 序列长度，每段视频取16帧
+  drop_first_n: 0            # 跳过序列前N帧
+
+  # 归一化配置
   use_trans_to_normalize: true
-  replace_noice_pc: false
+                            # 是否使用平移归一化 (以人体中心为原点)
+
+  # 噪声处理配置
+  replace_noice_pc: false    # 是否替换部分点为噪声
   replace_noice_pc_rate: false
+                            # 噪声替换比例
   replace_pc_strategy: 'random'
+                            # 噪声替换策略: 'random' / 'ballquery16' / 'ballquery1'
   noise_distribution: 'uniform'
-  add_noice_pc: false
+                            # 噪声分布: 'uniform' / 'normal'
+  add_noice_pc: false        # 是否添加噪声点
   set_body_label_all_one: false
-  random_permutation: false
-  use_boundary: false
-  inside_random: false
-  use_sample: false
-  range_image: false
-  range_image_W: 512
-  range_image_H: 512
-  fov_up: 12.5
+                            # 是否将身体标签全设为1
+  random_permutation: false  # 是否随机打乱点顺序
+
+  # 边界与采样配置
+  use_boundary: false        # 是否使用边界信息
+  inside_random: false       # 是否在边界内随机采样
+  use_sample: false          # 是否使用采样点云
+
+  # Range Image配置 (用于投影)
+  range_image: false         # 是否生成Range Image
+  range_image_W: 512         # Range Image宽度
+  range_image_H: 512         # Range Image高度
+  fov_up: 12.5               # LiDAR垂直视场角 (度)
+
+  # 数据集ID列表
   dataset_ids:
     - lidarcap_train
 
+# -----------------------------------------------------------------------------
+# 测试数据集配置
+# -----------------------------------------------------------------------------
 TestDataset:
   dataset_path: '/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M/lidarcap_test.hdf5'
+                            # HDF5数据集文件路径 (需修改为实际路径)
+
+  # 以下配置与TrainDataset相同
   use_aug: false
   concat_info: false
   use_rot: false

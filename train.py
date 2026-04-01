@@ -591,13 +591,9 @@ if __name__ == '__main__':
     logger.info("[INFO] Initializing AsyncCheckpointSaver for non-blocking model saves")
     async_saver = AsyncCheckpointSaver(max_queue_size=10)
     async_saver.start()
-    
-    net = Regressor()
-    loss = Loss()
-    
-    temporal_loss_config = cfg.TEMPORAL_LOSS
-    temporal_weight = temporal_loss_config.weight
-    loss.temporal_weight = temporal_weight
+
+    net = Regressor(cfg=cfg)
+    loss = Loss(cfg=cfg)
 
     # Define optimizer with improved parameters
     optimizer = torch.optim.Adam([p for p in net.parameters() if p.requires_grad],
