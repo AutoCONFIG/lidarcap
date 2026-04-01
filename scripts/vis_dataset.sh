@@ -87,7 +87,7 @@ echo "输出目录: ${OUTPUT}"
 echo "=============================================="
 
 # 运行可视化
-python tools/visualize_dataset.py \
+python vis/dataset.py \
     --mode ${MODE} \
     --split ${SPLIT} \
     --index ${INDEX} \

@@ -15,7 +15,7 @@
     bash scripts/vis_dataset.sh stats      # 查看统计
 
     # 或直接运行
-    python tools/visualize_dataset.py --mode single --index 0
+    python vis/dataset.py --mode single --index 0
 """
 
 import sys

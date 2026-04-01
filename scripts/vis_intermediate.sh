@@ -90,7 +90,7 @@ echo "===================================================================="
 echo ""
 
 cd "$(dirname "$0")/.."
-python tools/visualize_intermediate.py \
+python vis/intermediate.py \
     --model "$MODEL" \
     --seq "$SEQ" \
     --output "$OUTPUT_DIR"

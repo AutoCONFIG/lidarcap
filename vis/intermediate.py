@@ -5,7 +5,18 @@
 1. Transformer空间特征可视化
 2. Mamba时序建模效果可视化
 3. 两者协同效果对比
+
+运行方式:
+    # 使用启动脚本（推荐）
+    bash scripts/vis_intermediate.sh -m output/run_xxx/model/best-valid-loss.pth
+
+    # 或直接运行
+    python vis/intermediate.py --model <model_path> --seq 0
 """
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 import numpy as np
