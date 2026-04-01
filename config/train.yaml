@@ -15,8 +15,8 @@ TRAIN:
     min_lr: 1.0e-7
   
   early_stopping:
-    patience: 30
-    min_delta: 0.001
+    patience: 27
+    min_delta: 0.0006
   
   grad_clip: null
   use_amp: false
@@ -27,7 +27,7 @@ TRAIN:
   
   checkpoint:
     save_every: 1
-    keep_checkpoints: 5
+    keep_checkpoints: 1000
   
   log_interval: 100
   

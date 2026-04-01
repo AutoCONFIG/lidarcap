@@ -3,6 +3,11 @@
 # Dataset preprocessing script for LidarCap
 # This script converts raw data to HDF5 format for training
 
+set -e
+
+# 切换到项目根目录
+cd "$(dirname "$0")/.."
+
 # Configuration
 RAW_DATA_PATH="/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M"
 OUTPUT_PATH="/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M"
