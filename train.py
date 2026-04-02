@@ -607,6 +607,7 @@ if __name__ == '__main__':
         logger.info(f"Using DataParallel on {len(gpu_ids)} GPUs: {gpu_ids} (logical: {list(range(len(gpu_ids)))})")
     if iscuda:
         net = net.cuda()
+        loss = loss.cuda()  # Loss 模块也需要移动到 GPU
 
     # Define optimizer with improved parameters
     optimizer = torch.optim.Adam([p for p in net.parameters() if p.requires_grad],

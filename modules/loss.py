@@ -76,8 +76,6 @@ class TemporalConsistencyLoss(nn.Module):
 
 
 class Loss(nn.Module):
-    _smpl_instance = None  # 类级别的SMPL单例
-
     def __init__(self, cfg=None):
         super().__init__()
 
@@ -92,10 +90,8 @@ class Loss(nn.Module):
         self.criterion_vertices = nn.MSELoss()
         self.chamfer_loss = ChamferDistanceL1()
 
-        # 使用单例SMPL模型
-        if Loss._smpl_instance is None:
-            Loss._smpl_instance = SMPL()
-        self.smpl = Loss._smpl_instance
+        # 每个Loss实例创建自己的SMPL模块，确保能正确移动到GPU
+        self.smpl = SMPL()
 
         # 从配置文件读取时序损失参数
         self.temporal_loss = TemporalConsistencyLoss(
