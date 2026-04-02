@@ -25,9 +25,11 @@ class Crafter(nn.Module):
     def __init__(self, net):
         super().__init__()
         self.net = net
+        # 在初始化时记录是否使用 CUDA，避免 DataParallel 时 StopIteration
+        self._use_cuda = torch.cuda.is_available()
 
     def iscuda(self):
-        return next(self.net.parameters()).device != torch.device('cpu')
+        return self._use_cuda
 
     def todevice(self, x):
         if isinstance(x, dict):
