@@ -6,7 +6,7 @@
 # 运行时基础设置
 # -----------------------------------------------------------------------------
 RUNTIME:
-  gpu_id: 0                  # 单卡填数字，多卡填列表如 [0, 1, 2, 3]
+  gpu_id: [1,2,5,6]                  # 单卡填数字，多卡填列表如 [0, 1, 2, 3]
   output_dir: './output'     # 输出目录，存放训练结果和日志
   preload: true              # 是否预加载数据集到内存，加速数据读取
   debug: false               # 调试模式，启用后输出更多日志信息
@@ -43,7 +43,7 @@ JOINTS:
 # 训练数据集配置
 # -----------------------------------------------------------------------------
 TrainDataset:
-  dataset_path: '/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M/lidarcap_train.hdf5'
+  dataset_path: '/data2/kaiyun/.yun/lidarhuman26M/lidarcap_train.hdf5'
                             # HDF5数据集文件路径 (需修改为实际路径)
 
   # 数据增强选项
@@ -93,7 +93,7 @@ TrainDataset:
 # 测试数据集配置
 # -----------------------------------------------------------------------------
 TestDataset:
-  dataset_path: '/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M/lidarcap_test.hdf5'
+  dataset_path: '/data2/kaiyun/.yun/lidarhuman26M/lidarcap_test.hdf5'
                             # HDF5数据集文件路径 (需修改为实际路径)
 
   # 以下配置与TrainDataset相同
