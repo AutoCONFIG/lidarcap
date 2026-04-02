@@ -6,8 +6,8 @@
 # 训练基础参数
 # -----------------------------------------------------------------------------
 TRAIN:
-  batch_size: 4              # 训练批次大小，根据GPU显存调整 (显存8GB建议2-4)
-  eval_batch_size: 4         # 验证批次大小，通常与batch_size相同
+  batch_size: 16              # 训练批次大小，根据GPU显存调整 (显存8GB建议2-4)
+  eval_batch_size: 16         # 验证批次大小，通常与batch_size相同
   num_epochs: 600            # 最大训练轮数
   num_workers: 6             # 数据加载线程数，建议设为CPU核心数的一半
 

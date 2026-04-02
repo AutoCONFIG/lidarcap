@@ -4,6 +4,7 @@ import metric
 import numpy as np
 import os
 import torch
+import torch.nn as nn
 import logging
 import signal
 import json
@@ -647,23 +648,26 @@ if __name__ == '__main__':
         checkpoint = training_manager.load_progress(iscuda)
         if checkpoint:
             net.load_state_dict(checkpoint['model_state_dict'])
-            
+
             train = MyTrainer(net, loader, loss, optimizer, log_interval,
                              use_amp=use_amp, grad_clip=grad_clip)
             if iscuda:
+                if len(gpu_ids) > 1:
+                    train = nn.DataParallel(train, device_ids=list(range(len(gpu_ids))))
+                    logger.info(f"Using DataParallel on {len(gpu_ids)} GPUs: {gpu_ids}")
                 train = train.cuda()
-            
+
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            
+
             for i in range(len(scheduler.min_lrs)):
                 scheduler.min_lrs[i] = float(scheduler.min_lrs[i])
-            
+
             start_epoch = checkpoint['epoch'] + 1
             mintloss = checkpoint['mintloss']
             minvloss = checkpoint['minvloss']
             logger.info(f"Resumed from epoch {checkpoint['epoch']}, starting epoch {start_epoch}")
-            
+
             history = training_manager.get_training_history()
             if history:
                 logger.info("Training history:")
@@ -673,8 +677,10 @@ if __name__ == '__main__':
             train = MyTrainer(net, loader, loss, optimizer, log_interval,
                              use_amp=use_amp, grad_clip=grad_clip)
             if iscuda:
+                if len(gpu_ids) > 1:
+                    train = nn.DataParallel(train, device_ids=list(range(len(gpu_ids))))
                 train = train.cuda()
-    
+
     elif ckpt_path is not None:
         logger.info(f"Loading checkpoint from {ckpt_path}")
         save_model = torch.load(ckpt_path, map_location='cpu' if not iscuda else None)['state_dict']
@@ -683,15 +689,20 @@ if __name__ == '__main__':
                       if k in model_dict.keys()}
         model_dict.update(state_dict)
         net.load_state_dict(model_dict)
-        
+
         train = MyTrainer(net, loader, loss, optimizer, log_interval,
                          use_amp=use_amp, grad_clip=grad_clip)
         if iscuda:
+            if len(gpu_ids) > 1:
+                train = nn.DataParallel(train, device_ids=list(range(len(gpu_ids))))
             train = train.cuda()
     else:
         train = MyTrainer(net, loader, loss, optimizer, log_interval,
                          use_amp=use_amp, grad_clip=grad_clip)
         if iscuda:
+            if len(gpu_ids) > 1:
+                train = nn.DataParallel(train, device_ids=list(range(len(gpu_ids))))
+                logger.info(f"Using DataParallel on {len(gpu_ids)} GPUs: {gpu_ids}")
             train = train.cuda()
          
     if ckpt_path is not None:
