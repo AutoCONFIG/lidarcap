@@ -672,26 +672,27 @@ class CachedLidarCapDataset(Dataset):
         # 如果需要，预加载到内存
         self.cache = {}
         if self.cfg.preload:
-            # 先统计总数据量
+            import logging
+            logger = logging.getLogger(__name__)
+
+            # 统计总数据量
             keys_to_load = [k for k in self.h5file.keys()
                           if k not in ['dataset_ids', 'dataset_offsets', 'dataset_lengths']]
             total_size = 0
-            size_info = []
             for key in keys_to_load:
                 d = self.h5file[key]
                 if hasattr(d, 'shape') and len(d.shape) > 0 and d.shape[0] > 0:
-                    size_mb = d.nbytes / 1024 / 1024
-                    total_size += size_mb
-                    size_info.append((key, size_mb))
+                    total_size += d.nbytes / 1024 / 1024
 
-            print(f"[CachedLidarCapDataset] 正在预加载数据到内存 (共 {total_size/1024:.2f} GB)...")
-            pbar = tqdm(keys_to_load, desc="预加载", unit="dataset")
-            loaded_size = 0
-            for key in pbar:
-                self.cache[key] = self.h5file[key][:]
-                loaded_size += self.cache[key].nbytes / 1024 / 1024
-                pbar.set_postfix({"已加载": f"{loaded_size/1024:.2f} GB"})
-            print(f"[CachedLidarCapDataset] 预加载完成，共 {loaded_size/1024:.2f} GB 已加载到内存")
+            logger.info(f"预加载数据集到内存 ({total_size/1024:.2f} GB)...")
+
+            # 加载数据
+            for key in tqdm(keys_to_load, desc="预加载", unit="dataset", leave=False):
+                d = self.h5file[key]
+                if hasattr(d, 'shape') and len(d.shape) > 0 and d.shape[0] > 0:
+                    self.cache[key] = d[:]
+
+            logger.info(f"预加载完成，共 {total_size/1024:.2f} GB 已加载到内存")
 
         if self.cfg.use_rot or self.cfg.use_straight:
             from modules.smpl import SMPL
@@ -702,7 +703,6 @@ class CachedLidarCapDataset(Dataset):
     def __del__(self):
         if hasattr(self, 'h5file') and self.h5file:
             self.h5file.close()
-            print('[CachedLidarCapDataset] HDF5文件已关闭')
 
     def _has_key(self, key):
         """检查键是否存在于缓存或HDF5文件中"""

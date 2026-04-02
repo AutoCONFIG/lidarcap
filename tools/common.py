@@ -47,18 +47,3 @@ def hint(msg):
           timestamp + ' >> ' + '\033[0m' + msg)
 
 
-def clean_summary(filesuammry):
-    """
-    remove keys from wandb.log()
-    Args:
-        filesuammry:
-
-    Returns:
-
-    """
-    keys = [k for k in filesuammry.keys() if not k.startswith('_')]
-    for k in keys:
-        filesuammry.__delitem__(k)
-    return filesuammry
-
-

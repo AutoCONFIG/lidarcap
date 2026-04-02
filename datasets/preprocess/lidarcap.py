@@ -1,6 +1,4 @@
-from ast import parse
-from plyfile import PlyData, PlyElement
-from typing import List
+from plyfile import PlyData
 import argparse
 import numpy as np
 import json
@@ -25,21 +23,12 @@ smpl = SMPL().to(device)
 MAX_PROCESS_COUNT = 64
 ROOT_PATH = None  # 将在main中设置
 
-# img_filenames = []
-
 
 def read_ply(filename):
     """ read XYZ point cloud from filename PLY file """
     ply_data = PlyData.read(filename)['vertex'].data
     points = np.array([[x, y, z] for x, y, z in ply_data])
     return points
-
-
-def save_ply(filename, points):
-    points = [(points[i, 0], points[i, 1], points[i, 2]) for i in range(points.shape[0])]
-    vertex = np.array(points, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
-    el = PlyElement.describe(vertex, 'vertex', comments=['vertices'])
-    PlyData([el], text=False).write(filename)
 
 
 def get_index(filename):
@@ -80,10 +69,9 @@ def fix_points_num(points: np.array, num_points: int):
     return res
 
 
-def foo(id, args):
+def process_sequence(id, args):
+    """处理单个序列的数据"""
     id = str(id)
-    # cur_img_filenames = get_sorted_filenames_by_index(
-    #     os.path.join(ROOT_PATH, 'images', id))
 
     pose_filenames = get_sorted_filenames_by_index(
         os.path.join(ROOT_PATH, 'labels', '3d', 'pose', id))
@@ -93,9 +81,6 @@ def foo(id, args):
     cur_betas, cur_poses, cur_trans = multiprocess.multi_func(
         parse_json, MAX_PROCESS_COUNT, len(json_filenames), 'Load json files',
         True, json_filenames)
-    # cur_vertices = multiprocess.multi_func(
-    #     read_ply, MAX_PROCESS_COUNT, len(ply_filenames), 'Load vertices files',
-    #     True, ply_filenames)
 
     depth_filenames = get_sorted_filenames_by_index(
         os.path.join(ROOT_PATH, 'labels', '3d', 'depth', id))
@@ -134,7 +119,6 @@ def foo(id, args):
     poses = []
     betas = []
     trans = []
-    # vertices = []
     points_nums = []
     point_clouds = []
     depths = []
@@ -157,10 +141,6 @@ def foo(id, args):
     return np.array(poses), np.array(betas), np.array(trans), np.array(point_clouds), np.array(points_nums), cur_depths, np.array(full_joints), np.array(images)
 
 
-def test(args):
-    pass
-
-
 def get_sorted_ids(s):
     if re.match(r'^([1-9]\d*)-([1-9]\d*)$', s):
         start_index, end_index = s.split('-')
@@ -171,14 +151,11 @@ def get_sorted_ids(s):
 
 
 def dump(args):
-
-    seq_str = '' if args.seqlen == 0 else 'seq{}_'.format(args.seqlen)
     ids = get_sorted_ids(args.ids)
 
     whole_poses = np.zeros((0, 72))
     whole_betas = np.zeros((0, 10))
     whole_trans = np.zeros((0, 3))
-    # whole_vertices = np.zeros((0, 6890, 3))
     whole_point_clouds = np.zeros((0, args.npoints, 3))
     whole_points_nums = np.zeros((0,))
     whole_full_joints = np.zeros((0, 24, 3))
@@ -186,15 +163,12 @@ def dump(args):
     whole_images = None  # RGB images, 延迟初始化以获取正确尺寸
 
     for id in ids:
-        # poses, betas, trans, vertices, point_clouds, points_nums = foo(
-        poses, betas, trans, point_clouds, points_nums, depths, full_joints, images = foo(
+        poses, betas, trans, point_clouds, points_nums, depths, full_joints, images = process_sequence(
             id, args)
 
         whole_poses = np.concatenate((whole_poses, poses))
         whole_betas = np.concatenate((whole_betas, betas))
         whole_trans = np.concatenate((whole_trans, trans))
-        # whole_vertices = np.concatenate(
-        #     (whole_vertices, np.stack(vertices)))
         whole_point_clouds = np.concatenate(
             (whole_point_clouds, point_clouds))
         whole_points_nums = np.concatenate(
@@ -213,7 +187,6 @@ def dump(args):
         f.create_dataset('pose', data=whole_poses)
         f.create_dataset('shape', data=whole_betas)
         f.create_dataset('trans', data=whole_trans)
-        # f.create_dataset('human_vertex', data=whole_vertices)
         f.create_dataset('point_clouds', data=whole_point_clouds)
         f.create_dataset('points_num', data=whole_points_nums)
         f.create_dataset('depth', data=whole_depths)
@@ -235,9 +208,6 @@ if __name__ == '__main__':
     parser_dump.add_argument('--ids', type=str, required=True)
     parser_dump.add_argument('--name', type=str, required=True)
     parser_dump.set_defaults(func=dump)
-
-    parser_test = subparser.add_parser('test')
-    parser_test.set_defaults(func=test)
 
     args = parser.parse_args()
 

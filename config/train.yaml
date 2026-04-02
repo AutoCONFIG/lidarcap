@@ -6,10 +6,10 @@
 # 训练基础参数
 # -----------------------------------------------------------------------------
 TRAIN:
-  batch_size: 16             # 训练批次大小，多卡时每卡分摊
-  eval_batch_size: 16        # 验证批次大小
+  batch_size: 64             # 训练批次大小，多卡时每卡分摊
+  eval_batch_size: 64        # 验证批次大小
   num_epochs: 600            # 最大训练轮数
-  num_workers: 6             # 数据加载线程数，建议设为CPU核心数的一半
+  num_workers: 2             # 数据加载线程数（预加载后可减少）
 
   # 学习率相关
   learning_rate: 0.0001      # 初始学习率，Adam优化器常用1e-4
@@ -17,7 +17,7 @@ TRAIN:
 
   # 梯度与精度
   grad_clip: null            # 梯度裁剪阈值，null表示不裁剪
-  use_amp: false             # 是否使用混合精度训练
+  use_amp: true              # 是否使用混合精度训练（推荐开启）
 
   # 学习率调度器 (ReduceLROnPlateau)
   scheduler:
@@ -33,7 +33,7 @@ TRAIN:
 
   # 梯度与精度
   grad_clip: null            # 梯度裁剪阈值，null表示不裁剪，建议1.0-5.0
-  use_amp: false             # 是否使用混合精度训练，可减少显存但可能影响精度
+  use_amp: true              # 是否使用混合精度训练，可减少显存但可能影响精度
 
   # 学习率预热
   warmup:

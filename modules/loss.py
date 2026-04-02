@@ -8,11 +8,6 @@ from pointnet2_ops import pointnet2_utils
 from config import get_cfg
 
 
-def batch_pc_normalize(pc):
-    pc -= pc.mean(1, True)
-    return pc / pc.norm(dim=-1, keepdim=True).max(1, True)[0]
-
-
 class TemporalConsistencyLoss(nn.Module):
     def __init__(
         self,

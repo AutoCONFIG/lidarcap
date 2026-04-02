@@ -157,29 +157,30 @@ class MyTrainer(crafter.Trainer):
             with autocast():
                 output = self.net(inputs)
                 loss, details = self.loss_func(**output)
-            
+
             # 混合精度反向传播
             self.scaler.scale(loss).backward()
-            
+
             # 梯度裁剪
             if self.grad_clip is not None:
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip)
-            
+
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
             output = self.net(inputs)
             loss, details = self.loss_func(**output)
             loss.backward()
-            
+
             # 梯度裁剪
             if self.grad_clip is not None:
                 torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip)
-            
+
             self.optimizer.step()
-        
-        self.optimizer.zero_grad()
+
+        # set_to_none=True 可以减少显存访问，略微提升性能
+        self.optimizer.zero_grad(set_to_none=True)
         return details
 
     def forward_val(self, inputs):
@@ -577,7 +578,6 @@ if __name__ == '__main__':
     keep_checkpoints = cfg.TRAIN.checkpoint.keep_checkpoints
     
     if preload:
-        print("[INFO] Using CachedLidarCapDataset with preload=True for faster data loading")
         train_dataset = CachedLidarCapDataset(cfg=cfg.TrainDataset, dataset=dataset_name, train=True, preload=True)
     else:
         train_dataset = TemporalDataset(cfg=cfg.TrainDataset, dataset=dataset_name, train=True)

@@ -116,9 +116,7 @@ class Trainer(Crafter):
 
             # compute gradient and do model update
             if train:
-                self.optimizer.zero_grad()
                 details = self.forward_backward(inputs)
-                self.optimizer.step()
             else:
                 with torch.no_grad():
                     details = self.forward_val(inputs)
