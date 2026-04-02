@@ -9,10 +9,6 @@ import torch.nn as nn
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 用于控制进度条只显示一次
-_tqdm_lock = threading.Lock()
-_tqdm_instance = None
-
 
 def mean(lis): return sum(lis) / len(lis)
 
@@ -30,26 +26,22 @@ class Crafter(nn.Module):
     def __init__(self, net):
         super().__init__()
         self.net = net
-        # 在初始化时记录是否使用 CUDA，避免 DataParallel 时 StopIteration
         self._use_cuda = torch.cuda.is_available()
 
     def iscuda(self):
         return self._use_cuda
 
-    def todevice(self, x, device=None):
+    def todevice(self, x):
         if isinstance(x, dict):
-            return {k: self.todevice(v, device) for k, v in x.items()}
+            return {k: self.todevice(v) for k, v in x.items()}
         if isinstance(x, (tuple, list)):
-            return [self.todevice(v, device) for v in x]
+            return [self.todevice(v) for v in x]
 
         if self.iscuda():
             if isinstance(x, str):
                 return x
             else:
-                if device is not None:
-                    return x.contiguous().to(device, non_blocking=True)
-                else:
-                    return x.contiguous().cuda(non_blocking=True)
+                return x.contiguous().cuda(non_blocking=True)
         else:
             return x.cpu()
 
@@ -64,10 +56,10 @@ class Trainer(Crafter):
         self.loss_func = loss
         self.optimizer = optimizer
         self.log_interval = log_interval
+        # 检查是否使用 DataParallel
+        self._is_dataparallel = isinstance(self.net, nn.DataParallel)
 
     def __call__(self, epoch, train=True, test=False, visual=False):
-        global _tqdm_instance
-
         if train:
             self.net.train()
             key = 'Train'
@@ -82,7 +74,6 @@ class Trainer(Crafter):
 
         loader = self.loader[key]
 
-        # 只创建一个进度条
         bar = tqdm(loader, bar_format="{l_bar}{bar:3}{r_bar}", ncols=236, leave=True)
 
         if test:
@@ -120,7 +111,9 @@ class Trainer(Crafter):
 
         bar.set_description(f'{key} {epoch:02d}')
         for iter, inputs in enumerate(bar):
+            # DataParallel 需要数据在主 GPU 上，然后自动分割分发
             inputs = self.todevice(inputs)
+
             # compute gradient and do model update
             if train:
                 self.optimizer.zero_grad()

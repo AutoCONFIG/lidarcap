@@ -353,11 +353,14 @@ class TrainingProgressTracker:
         
     def save_progress(self, epoch, net, optimizer, scheduler, mintloss, minvloss):
         """Save training progress"""
+        # 处理 DataParallel 包装的模型
+        model_state = net.module.state_dict() if isinstance(net, nn.DataParallel) else net.state_dict()
+
         progress = {
             'epoch': epoch,
             'mintloss': float(mintloss),
             'minvloss': float(minvloss),
-            'model_state_dict': net.state_dict(),
+            'model_state_dict': model_state,
             'optimizer_state_dict': optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict()
         }
@@ -596,6 +599,15 @@ if __name__ == '__main__':
     net = Regressor(cfg=cfg)
     loss = Loss(cfg=cfg)
 
+    # 多卡并行：只包装模型，不包装训练器
+    # 注意：device_ids 必须是逻辑 GPU 编号 [0, 1, 2, ...]
+    # 因为 CUDA_VISIBLE_DEVICES 已经设置了可见 GPU
+    if iscuda and len(gpu_ids) > 1:
+        net = nn.DataParallel(net, device_ids=list(range(len(gpu_ids))))
+        logger.info(f"Using DataParallel on {len(gpu_ids)} GPUs: {gpu_ids} (logical: {list(range(len(gpu_ids)))})")
+    if iscuda:
+        net = net.cuda()
+
     # Define optimizer with improved parameters
     optimizer = torch.optim.Adam([p for p in net.parameters() if p.requires_grad],
                                  lr=lr, weight_decay=1e-4, eps=1e-8, amsgrad=True)
@@ -647,15 +659,19 @@ if __name__ == '__main__':
     if resume:
         checkpoint = training_manager.load_progress(iscuda)
         if checkpoint:
-            net.load_state_dict(checkpoint['model_state_dict'])
+            # 加载模型权重时需要处理 DataParallel 的 key 前缀
+            state_dict = checkpoint['model_state_dict']
+            # 如果保存的是 DataParallel 模型，去除 'module.' 前缀
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                if k.startswith('module.'):
+                    new_state_dict[k[7:]] = v
+                else:
+                    new_state_dict[k] = v
+            net.load_state_dict(new_state_dict)
 
             train = MyTrainer(net, loader, loss, optimizer, log_interval,
                              use_amp=use_amp, grad_clip=grad_clip)
-            if iscuda:
-                if len(gpu_ids) > 1:
-                    train = nn.DataParallel(train, device_ids=list(range(len(gpu_ids))))
-                    logger.info(f"Using DataParallel on {len(gpu_ids)} GPUs: {gpu_ids}")
-                train = train.cuda()
 
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -676,10 +692,6 @@ if __name__ == '__main__':
         else:
             train = MyTrainer(net, loader, loss, optimizer, log_interval,
                              use_amp=use_amp, grad_clip=grad_clip)
-            if iscuda:
-                if len(gpu_ids) > 1:
-                    train = nn.DataParallel(train, device_ids=list(range(len(gpu_ids))))
-                train = train.cuda()
 
     elif ckpt_path is not None:
         logger.info(f"Loading checkpoint from {ckpt_path}")
@@ -692,18 +704,9 @@ if __name__ == '__main__':
 
         train = MyTrainer(net, loader, loss, optimizer, log_interval,
                          use_amp=use_amp, grad_clip=grad_clip)
-        if iscuda:
-            if len(gpu_ids) > 1:
-                train = nn.DataParallel(train, device_ids=list(range(len(gpu_ids))))
-            train = train.cuda()
     else:
         train = MyTrainer(net, loader, loss, optimizer, log_interval,
                          use_amp=use_amp, grad_clip=grad_clip)
-        if iscuda:
-            if len(gpu_ids) > 1:
-                train = nn.DataParallel(train, device_ids=list(range(len(gpu_ids))))
-                logger.info(f"Using DataParallel on {len(gpu_ids)} GPUs: {gpu_ids}")
-            train = train.cuda()
          
     if ckpt_path is not None:
         logger.info("=== EVALUATION MODE ===")
@@ -758,16 +761,17 @@ if __name__ == '__main__':
 
                 # save model in this epoch
                 # if this model is better, then save it as best
+                model_state = net.module.state_dict() if isinstance(net, nn.DataParallel) else net.state_dict()
                 if train_loss_dict['loss'] <= mintloss:
                     mintloss = train_loss_dict['loss']
                     best_save = os.path.join(model_dir, 'best-train-loss.pth')
-                    async_saver.save_async(net.state_dict(), best_save, metadata={'epoch': epoch, 'loss': mintloss, 'type': 'best_train'})
+                    async_saver.save_async(model_state, best_save, metadata={'epoch': epoch, 'loss': mintloss, 'type': 'best_train'})
                     logger.info(f"NEW BEST TRAIN LOSS! Queuing async save at epoch {epoch} (loss: {mintloss:.6f})")
-                    
+
                 if val_loss_dict['loss'] <= minvloss:
                     minvloss = val_loss_dict['loss']
                     best_save = os.path.join(model_dir, 'best-valid-loss.pth')
-                    async_saver.save_async(net.state_dict(), best_save, metadata={'epoch': epoch, 'loss': minvloss, 'type': 'best_valid'})
+                    async_saver.save_async(model_state, best_save, metadata={'epoch': epoch, 'loss': minvloss, 'type': 'best_valid'})
                     logger.info(f"NEW BEST VALIDATION LOSS! Queuing async save at epoch {epoch} (loss: {minvloss:.6f})")
 
                 # 学习率调度器（不在预热期间使用）
@@ -781,7 +785,9 @@ if __name__ == '__main__':
                 
                 # 早停检查（使用验证损失）
                 if early_stopping is not None:
-                    if early_stopping(val_loss_dict['loss'], net):
+                    # 获取实际模型用于早停恢复权重
+                    actual_model = net.module if isinstance(net, nn.DataParallel) else net
+                    if early_stopping(val_loss_dict['loss'], actual_model):
                         logger.info(f"Early stopping triggered at epoch {epoch}")
                         logger.info(f"No improvement in validation loss for {early_stopping.patience} epochs")
                         logger.info(f"Best validation loss: {early_stopping.best_score:.6f}")
