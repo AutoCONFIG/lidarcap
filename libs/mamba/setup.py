@@ -38,7 +38,7 @@ BASE_WHEEL_URL = "https://github.com/state-spaces/mamba/releases/download/{tag_n
 
 # FORCE_BUILD: Force a fresh build locally, instead of attempting to find prebuilt wheels
 # SKIP_CUDA_BUILD: Intended to allow CI to use a simple `python setup.py sdist` run to copy over raw files, without any cuda compilation
-FORCE_BUILD = os.getenv("MAMBA_FORCE_BUILD", "FALSE") == "TRUE"
+FORCE_BUILD = os.getenv("MAMBA_FORCE_BUILD", "FALSE").upper() in ("TRUE", "1")
 SKIP_CUDA_BUILD = os.getenv("MAMBA_SKIP_CUDA_BUILD", "FALSE") == "TRUE"
 # For CI, we want the option to build with C++11 ABI since the nvcr images use C++11 ABI
 FORCE_CXX11_ABI = os.getenv("MAMBA_FORCE_CXX11_ABI", "FALSE") == "TRUE"
@@ -334,6 +334,7 @@ class CachedWheelsCommand(_bdist_wheel):
 
     def run(self):
         if FORCE_BUILD:
+            print("FORCE_BUILD is set, building from source...")
             return super().run()
 
         wheel_url, wheel_filename = get_wheel_url()
@@ -353,8 +354,9 @@ class CachedWheelsCommand(_bdist_wheel):
             wheel_path = os.path.join(self.dist_dir, archive_basename + ".whl")
             print("Raw wheel path", wheel_path)
             shutil.move(wheel_filename, wheel_path)
-        except urllib.error.HTTPError:
-            print("Precompiled wheel not found. Building from source...")
+        except (urllib.error.HTTPError, urllib.error.URLError, Exception) as e:
+            print(f"Failed to download precompiled wheel: {e}")
+            print("Building from source...")
             # If the wheel could not be downloaded, build from source
             super().run()
 
