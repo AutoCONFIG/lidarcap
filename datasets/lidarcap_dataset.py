@@ -672,11 +672,26 @@ class CachedLidarCapDataset(Dataset):
         # 如果需要，预加载到内存
         self.cache = {}
         if self.cfg.preload:
-            print("[CachedLidarCapDataset] 正在预加载数据到内存...")
-            for key in tqdm(self.h5file.keys(), desc="预加载"):
-                if key not in ['dataset_ids', 'dataset_offsets', 'dataset_lengths']:
-                    self.cache[key] = self.h5file[key][:]
-            print("[CachedLidarCapDataset] 预加载完成")
+            # 先统计总数据量
+            keys_to_load = [k for k in self.h5file.keys()
+                          if k not in ['dataset_ids', 'dataset_offsets', 'dataset_lengths']]
+            total_size = 0
+            size_info = []
+            for key in keys_to_load:
+                d = self.h5file[key]
+                if hasattr(d, 'shape') and len(d.shape) > 0 and d.shape[0] > 0:
+                    size_mb = d.nbytes / 1024 / 1024
+                    total_size += size_mb
+                    size_info.append((key, size_mb))
+
+            print(f"[CachedLidarCapDataset] 正在预加载数据到内存 (共 {total_size/1024:.2f} GB)...")
+            pbar = tqdm(keys_to_load, desc="预加载", unit="dataset")
+            loaded_size = 0
+            for key in pbar:
+                self.cache[key] = self.h5file[key][:]
+                loaded_size += self.cache[key].nbytes / 1024 / 1024
+                pbar.set_postfix({"已加载": f"{loaded_size/1024:.2f} GB"})
+            print(f"[CachedLidarCapDataset] 预加载完成，共 {loaded_size/1024:.2f} GB 已加载到内存")
 
         if self.cfg.use_rot or self.cfg.use_straight:
             from modules.smpl import SMPL
