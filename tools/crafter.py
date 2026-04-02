@@ -1,5 +1,6 @@
 from tqdm import tqdm
 from collections import defaultdict
+import threading
 
 import os
 import numpy as np
@@ -7,6 +8,10 @@ import torch
 import torch.nn as nn
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 用于控制进度条只显示一次
+_tqdm_lock = threading.Lock()
+_tqdm_instance = None
 
 
 def mean(lis): return sum(lis) / len(lis)
@@ -16,7 +21,7 @@ class Crafter(nn.Module):
     """ Helper class to train/valid a deep network.
         Overload this class `forward_backward` for your actual needs.
 
-    Usage: 
+    Usage:
         train/valid = Trainer/Valider(net, loader, loss, optimizer)
         for epoch in range(n_epochs):
             train()/valid()
@@ -31,17 +36,20 @@ class Crafter(nn.Module):
     def iscuda(self):
         return self._use_cuda
 
-    def todevice(self, x):
+    def todevice(self, x, device=None):
         if isinstance(x, dict):
-            return {k: self.todevice(v) for k, v in x.items()}
+            return {k: self.todevice(v, device) for k, v in x.items()}
         if isinstance(x, (tuple, list)):
-            return [self.todevice(v) for v in x]
+            return [self.todevice(v, device) for v in x]
 
         if self.iscuda():
             if isinstance(x, str):
                 return x
             else:
-                return x.contiguous().cuda(non_blocking=True)
+                if device is not None:
+                    return x.contiguous().to(device, non_blocking=True)
+                else:
+                    return x.contiguous().cuda(non_blocking=True)
         else:
             return x.cpu()
 
@@ -58,6 +66,7 @@ class Trainer(Crafter):
         self.log_interval = log_interval
 
     def __call__(self, epoch, train=True, test=False, visual=False):
+        global _tqdm_instance
 
         if train:
             self.net.train()
@@ -73,7 +82,8 @@ class Trainer(Crafter):
 
         loader = self.loader[key]
 
-        bar = tqdm(loader, bar_format="{l_bar}{bar:3}{r_bar}", ncols=236)
+        # 只创建一个进度条
+        bar = tqdm(loader, bar_format="{l_bar}{bar:3}{r_bar}", ncols=236, leave=True)
 
         if test:
             rotmats = []
