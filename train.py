@@ -47,8 +47,20 @@ def setup_distributed(rank, world_size):
     """初始化分布式训练环境"""
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '29500'
-    dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
+    # 设置当前进程使用的 GPU
     torch.cuda.set_device(rank)
+    # 初始化分布式进程组
+    try:
+        # PyTorch 2.3+ 支持 device_id 参数
+        dist.init_process_group(
+            backend='nccl',
+            rank=rank,
+            world_size=world_size,
+            device_id=torch.device(f'cuda:{rank}')
+        )
+    except TypeError:
+        # 旧版本 PyTorch 不支持 device_id
+        dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
 
 
 def cleanup_distributed():

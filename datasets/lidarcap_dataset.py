@@ -694,6 +694,10 @@ class CachedLidarCapDataset(Dataset):
 
             logger.info(f"预加载完成，共 {total_size/1024:.2f} GB 已加载到内存")
 
+            # 预加载完成后关闭 HDF5 文件，避免 pickle 问题
+            self.h5file.close()
+            self.h5file = None
+
         if self.cfg.use_rot or self.cfg.use_straight:
             from modules.smpl import SMPL
             self.smpl = SMPL()
@@ -706,14 +710,20 @@ class CachedLidarCapDataset(Dataset):
 
     def _has_key(self, key):
         """检查键是否存在于缓存或HDF5文件中"""
-        return key in self.cache or key in self.h5file
+        if key in self.cache:
+            return True
+        if self.h5file is not None and key in self.h5file:
+            return True
+        return False
 
     def _get_data(self, key, start, end):
         """从缓存或文件读取数据"""
         if key in self.cache:
             return self.cache[key][start:end]
-        else:
+        elif self.h5file is not None:
             return self.h5file[key][start:end]
+        else:
+            raise KeyError(f"Key {key} not found in cache or HDF5 file")
 
     def access_hdf5(self, index):
         """访问HDF5数据，返回序列数据"""

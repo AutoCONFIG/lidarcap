@@ -156,6 +156,7 @@ class Regressor(nn.Module):
             cfg = get_cfg()
 
         mamba_cfg = cfg.MAMBA
+        pointr_cfg = cfg.PoinTr
 
         self.encoder = PointNet2Encoder()
         self.pose_s1 = MambaTemporal(
@@ -170,9 +171,9 @@ class Regressor(nn.Module):
         )
         self.pose_s2 = STGCN(3 + 1024 + 384)
         self.pointr = PoinTr(
-            trans_dim=384,
-            num_query=224,
-            knn_layer=1
+            trans_dim=pointr_cfg.trans_dim,
+            num_query=pointr_cfg.num_query,
+            knn_layer=pointr_cfg.knn_layer
         )
 
     def forward(self, data):

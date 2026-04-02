@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from timm.models.layers import DropPath, trunc_normal_
+from timm.layers import DropPath, trunc_normal_
 
 from .dgcnn_group import DGCNN_Grouper
 from .logger import get_root_logger, get_logger, print_log
@@ -195,7 +195,7 @@ class DecoderBlock(nn.Module):
             knn_f = knn_f.max(dim=1, keepdim=False)[0]
             q_1 = torch.cat([q_1, knn_f], dim=-1)
             q_1 = self.merge_map(q_1)
-        
+
         q = q + self.drop_path(q_1)
 
         norm_q = self.norm_q(q)
@@ -249,7 +249,7 @@ class Block(nn.Module):
             knn_f = knn_f.max(dim=1, keepdim=False)[0]
             x_1 = torch.cat([x_1, knn_f], dim=-1)
             x_1 = self.merge_map(x_1)
-        
+
         x = x + self.drop_path(x_1)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
