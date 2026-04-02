@@ -30,12 +30,17 @@ from tqdm import tqdm
 
 # 尝试导入混合精度训练支持
 try:
-    from torch.cuda.amp import autocast, GradScaler
+    from torch.amp import autocast, GradScaler
     AMP_AVAILABLE = True
 except ImportError:
-    AMP_AVAILABLE = False
-    autocast = None
-    GradScaler = None
+    # 兼容旧版本 PyTorch
+    try:
+        from torch.cuda.amp import autocast, GradScaler
+        AMP_AVAILABLE = True
+    except ImportError:
+        AMP_AVAILABLE = False
+        autocast = None
+        GradScaler = None
 
 
 def setup_distributed(rank, world_size):

@@ -16,6 +16,22 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import get_cfg
 
+# 兼容新旧版本的 autocast
+try:
+    from torch.amp import autocast
+except ImportError:
+    from torch.cuda.amp import autocast
+
+
+class DisableAutocast:
+    """上下文管理器，用于禁用 autocast"""
+    def __enter__(self):
+        self.prev = torch.is_autocast_enabled()
+        torch.set_autocast_enabled(False)
+        return self
+    def __exit__(self, *args):
+        torch.set_autocast_enabled(self.prev)
+
 def fps(pc, num):
     fps_idx = pointnet2_utils.furthest_point_sample(pc, num) 
     sub_pc = pointnet2_utils.gather_operation(pc.transpose(1, 2).contiguous(), fps_idx).transpose(1,2).contiguous()
@@ -50,7 +66,9 @@ class PoinTr(nn.Module):
         B, T, N, C = xyz.shape
         xyz = xyz.reshape(B * T, N, C)
 
-        q, coarse_point_cloud = self.base_model(xyz)
+        # PoinTr 内部有 CUDA 操作，需要禁用 autocast
+        with DisableAutocast():
+            q, coarse_point_cloud = self.base_model(xyz)
 
         B_T, M, C = q.shape
 
@@ -71,7 +89,8 @@ class PoinTr(nn.Module):
 
         with torch.no_grad():
             K_input = 128
-            sampled_input = fps(xyz, K_input)
+            with DisableAutocast():
+                sampled_input = fps(xyz, K_input)
 
         merged_point_cloud = torch.cat([coarse_point_cloud, sampled_input], dim=1)
         merged_point_cloud = merged_point_cloud.view(B, T, -1, 3)
@@ -115,12 +134,16 @@ class PointNet2Encoder(nn.Module):
 
     def forward(self, data):
         x = data['human_points']
-        
+
         B, T, N, _ = x.shape
         x = x.reshape(-1, N, 3)
         xyz, features = self._break_up_pc(x)
-        for module in self.SA_modules:
-            xyz, features = module(xyz, features)
+
+        # PointNet2 CUDA 操作不支持半精度，需要禁用 autocast
+        with DisableAutocast():
+            for module in self.SA_modules:
+                xyz, features = module(xyz, features)
+
         features = features.squeeze(-1).reshape(B, T, -1)
         return features
 
