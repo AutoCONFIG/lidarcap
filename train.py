@@ -517,9 +517,9 @@ if __name__ == '__main__':
     ckpt_path = cfg.RUNTIME.checkpoint_path
     preload = cfg.RUNTIME.preload
     output_dir = cfg.RUNTIME.output_dir
-    gpu_id = cfg.RUNTIME.gpu_id
-    
-    iscuda = common.torch_set_gpu([gpu_id])
+    gpu_ids = cfg.RUNTIME.gpu_ids  # 自动推导：单卡 [0] 或多卡 [0,1,2,3]
+
+    iscuda = common.torch_set_gpu(gpu_ids)
     common.make_reproducible(iscuda, 0)
 
     # Handle resume or create new run
@@ -705,7 +705,7 @@ if __name__ == '__main__':
         logger.info(f"Current best - Train Loss: {mintloss:.6f}, Val Loss: {minvloss:.6f}")
         logger.info(f"Dataset: {dataset_name}")
         logger.info(f"Batch size: {batch_size}, Learning rate: {lr}")
-        logger.info(f"Using GPU: {gpu_id if iscuda else 'CPU'}")
+        logger.info(f"Using GPU: {gpu_ids if iscuda else 'CPU'}")
         
         epoch = start_epoch
         

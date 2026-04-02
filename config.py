@@ -119,7 +119,6 @@ def get_cfg_defaults():
     
     cfg.RUNTIME = CN()
     cfg.RUNTIME.gpu_id = 0
-    cfg.RUNTIME.num_gpus = 1
     cfg.RUNTIME.output_dir = './lidarcap_output'
     cfg.RUNTIME.preload = True
     cfg.RUNTIME.debug = False
@@ -231,16 +230,30 @@ def validate_config(cfg):
     for section in required_sections:
         if section not in cfg:
             raise ValueError(f'配置缺少 {section} 节点')
-    
+
     required_paths = ['DATA_DIR', 'SMPL_MODEL']
     for path_key in required_paths:
         if not hasattr(cfg.PATHS, path_key):
             raise ValueError(f'配置缺少 PATHS.{path_key}')
-    
+
     if 'TrainDataset' not in cfg:
         raise ValueError('配置缺少 TrainDataset 节点')
     if 'TestDataset' not in cfg:
         raise ValueError('配置缺少 TestDataset 节点')
+
+    # 智能处理 gpu_id：支持 int 或 list/tuple，自动推导 num_gpus 和 gpu_ids
+    if hasattr(cfg.RUNTIME, 'gpu_id'):
+        gpu_id = cfg.RUNTIME.gpu_id
+        if isinstance(gpu_id, (list, tuple)):
+            # 多卡情况
+            cfg.RUNTIME.gpu_ids = list(gpu_id)
+            cfg.RUNTIME.num_gpus = len(gpu_id)
+            cfg.RUNTIME._primary_gpu = int(gpu_id[0])
+        elif isinstance(gpu_id, int):
+            # 单卡情况
+            cfg.RUNTIME.gpu_ids = [gpu_id]
+            cfg.RUNTIME.num_gpus = 1
+            cfg.RUNTIME._primary_gpu = gpu_id
 
 
 _cfg = None
