@@ -626,8 +626,11 @@ class CachedLidarCapDataset(Dataset):
         if cfg is not None:
             assert not hasattr(self, 'cfg'), 'cfg for initialization！'
             self.cfg = cfg
+            # 先更新默认值，再更新 kwargs（kwargs 优先级最高）
             self.cfg.update({k: v for k, v in CachedLidarCapDataset.default_cfg.items() if
                              k not in self.cfg})
+            # 重要：kwargs 中的参数（如 preload）覆盖 cfg 中的值
+            self.cfg.update(kwargs)
         else:
             cfg = CachedLidarCapDataset.default_cfg.copy()
             cfg.update(kwargs)

@@ -94,6 +94,7 @@ class Loss(nn.Module):
         self.smpl = SMPL()
 
         # 从配置文件读取时序损失参数
+        self.temporal_enabled = temporal_cfg.enabled  # 检查是否启用
         self.temporal_loss = TemporalConsistencyLoss(
             velocity_weight=temporal_cfg.velocity_weight,
             acceleration_weight=temporal_cfg.acceleration_weight,
@@ -157,7 +158,7 @@ class Loss(nn.Module):
             loss_chamfer = self.chamfer_loss(pred_points, merged_gt_points)
             details['loss_chamfer_smpl'] = loss_chamfer
 
-        if 'pred_full_joints' in kw:
+        if 'pred_full_joints' in kw and self.temporal_enabled:
             pred_full_joints = kw['pred_full_joints']
             temporal_dict = self.temporal_loss(pred_full_joints)
             details.update(temporal_dict)
