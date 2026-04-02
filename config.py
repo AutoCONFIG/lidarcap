@@ -5,18 +5,36 @@
 
 import os
 import yaml
-from types import SimpleNamespace
 
 
-def dict_to_namespace(d):
-    """递归将字典转换为命名空间对象，支持 . 访问"""
+class ConfigNode(dict):
+    """配置节点，同时支持字典操作和属性访问"""
+
+    def __getattr__(self, key):
+        try:
+            value = self[key]
+            if isinstance(value, dict) and not isinstance(value, ConfigNode):
+                self[key] = ConfigNode(value)  # 自动转换为 ConfigNode
+            return self[key]
+        except KeyError:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
+
+    def __setattr__(self, key, value):
+        self[key] = value
+
+    def __delattr__(self, key):
+        try:
+            del self[key]
+        except KeyError:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
+
+
+def dict_to_config(d):
+    """递归将字典转换为 ConfigNode"""
     if isinstance(d, dict):
-        ns = SimpleNamespace()
-        for k, v in d.items():
-            setattr(ns, k, dict_to_namespace(v))
-        return ns
+        return ConfigNode({k: dict_to_config(v) for k, v in d.items()})
     elif isinstance(d, list):
-        return [dict_to_namespace(item) for item in d]
+        return [dict_to_config(item) for item in d]
     else:
         return d
 
@@ -29,7 +47,7 @@ def load_config(config_dir=None):
         config_dir: 配置文件目录，默认为 config/
 
     Returns:
-        cfg: 配置对象（支持 . 访问）
+        cfg: ConfigNode 对象
     """
     if config_dir is None:
         config_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config')
@@ -44,11 +62,18 @@ def load_config(config_dir=None):
             with open(config_path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f)
                 if data:
-                    cfg_dict.update(data)
+                    # 深度合并
+                    def deep_merge(base, update):
+                        for k, v in update.items():
+                            if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                                deep_merge(base[k], v)
+                            else:
+                                base[k] = v
+                    deep_merge(cfg_dict, data)
         else:
             raise FileNotFoundError(f'配置文件不存在: {config_path}')
 
-    return dict_to_namespace(cfg_dict)
+    return dict_to_config(cfg_dict)
 
 
 def validate_config(cfg):
@@ -63,21 +88,20 @@ def validate_config(cfg):
     }
 
     for section, keys in required.items():
-        if not hasattr(cfg, section):
+        if section not in cfg:
             raise ValueError(f'配置缺少必填节: {section}')
-        section_obj = getattr(cfg, section)
         for key in keys:
-            if not hasattr(section_obj, key):
+            if key not in cfg[section]:
                 raise ValueError(f'配置缺少必填项: {section}.{key}')
 
     # 数据集配置
-    if not hasattr(cfg, 'TrainDataset'):
+    if 'TrainDataset' not in cfg:
         raise ValueError('配置缺少必填节: TrainDataset')
-    if not hasattr(cfg, 'TestDataset'):
+    if 'TestDataset' not in cfg:
         raise ValueError('配置缺少必填节: TestDataset')
 
     # 智能处理 gpu_id：支持 int 或 list/tuple，自动推导
-    if hasattr(cfg.RUNTIME, 'gpu_id'):
+    if 'gpu_id' in cfg.RUNTIME:
         gpu_id = cfg.RUNTIME.gpu_id
         if isinstance(gpu_id, (list, tuple)):
             cfg.RUNTIME.gpu_ids = list(gpu_id)
@@ -103,9 +127,7 @@ if __name__ == '__main__':
     cfg = get_cfg()
     print('=== 配置信息 ===')
     for section in ['TRAIN', 'PATHS', 'RUNTIME']:
-        if hasattr(cfg, section):
+        if section in cfg:
             print(f'{section}:')
-            section_obj = getattr(cfg, section)
-            for key in dir(section_obj):
-                if not key.startswith('_'):
-                    print(f'  {key}: {getattr(section_obj, key)}')
+            for key, val in cfg[section].items():
+                print(f'  {key}: {val}')
