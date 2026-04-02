@@ -225,7 +225,7 @@ def dump(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--output_dir', type=str,
-                       default='/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M',
+                       default='/data2/kaiyun/.yun/lidarhuman26M',
                        help='输出目录')
     subparser = parser.add_subparsers()
 

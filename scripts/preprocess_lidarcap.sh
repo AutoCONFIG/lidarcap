@@ -9,8 +9,8 @@ set -e
 cd "$(dirname "$0")/.."
 
 # Configuration
-RAW_DATA_PATH="/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M"
-OUTPUT_PATH="/media/yun/de2a43ce-446c-4a62-99b3-8ddc6ea1ef87/lidarhuman26M"
+RAW_DATA_PATH="/data2/kaiyun/.yun/lidarhuman26M"
+OUTPUT_PATH="/data2/kaiyun/.yun/lidarhuman26M"
 SEQLEN=1
 NPOINTS=512
 TRAIN_IDS="5,6,8,25,26,27,28,30,31,32,33,34,35,36,37,38,39,40,42"
