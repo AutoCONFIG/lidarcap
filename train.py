@@ -1138,8 +1138,7 @@ def train_worker(rank, world_size, cfg, args):
                 stats = async_saver.get_stats()
                 logger.info(f"Checkpoint saver stats: {stats['saved']} saved, {stats['failed']} failed")
                 logger.info("Training finished!")
-
-    cleanup_distributed()
+            cleanup_distributed()
 
 
 def main():

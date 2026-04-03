@@ -42,8 +42,9 @@ echo "【停止训练】按 Ctrl+C"
 echo "【恢复会话】再次执行此脚本"
 echo "===================================================================="
 echo ""
-sleep 1
 
-tmux new-session -s "$SESSION_NAME" -c "$PROJECT_ROOT"
+# 创建分离的会话，发送命令，然后 attach
+tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT"
 tmux send-keys -t "$SESSION_NAME" "cd $PROJECT_ROOT && python train.py --config-dir $CONFIG_DIR" Enter
+sleep 1
 tmux attach-session -t "$SESSION_NAME"
