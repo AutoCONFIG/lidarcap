@@ -371,26 +371,26 @@ class EarlyStopping:
         self.counter = 0
         self.best_weights = None
 
-    def __call__(self, score, model):
+    def __call__(self, score, model, rank=0):
         if self.mode == 'min':
             score = -score
 
         if self.best_score is None:
             self.best_score = score
-            if self.restore_best_weights:
+            if self.restore_best_weights and rank == 0:
                 self.best_weights = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             return False
 
         if score < self.best_score + self.min_delta:
             self.counter += 1
             if self.counter >= self.patience:
-                if self.restore_best_weights and self.best_weights:
+                if self.restore_best_weights and self.best_weights and rank == 0:
                     model.load_state_dict(self.best_weights)
                 return True
         else:
             self.best_score = score
             self.counter = 0
-            if self.restore_best_weights:
+            if self.restore_best_weights and rank == 0:
                 self.best_weights = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
         return False
@@ -1028,7 +1028,7 @@ def train_worker(rank, world_size, cfg, args):
         state_dict = {k: v for k, v in save_model.items()
                       if k in model_dict.keys()}
         model_dict.update(state_dict)
-        net.load_state_dict(model_state)
+        net.load_state_dict(model_dict)
 
     if ckpt_path is not None:
         if rank == 0:
@@ -1089,7 +1089,7 @@ def train_worker(rank, world_size, cfg, args):
                     training_manager.save_epoch_result(epoch, train_loss_dict['loss'], val_loss_dict['loss'],
                                                       lr=current_lr, train_time=train_time, val_time=val_time)
 
-                # Save model
+                # Save model (rank 0 执行，但需要同步屏障)
                 if rank == 0:
                     model_state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
                     if train_loss_dict['loss'] <= mintloss:
@@ -1104,6 +1104,15 @@ def train_worker(rank, world_size, cfg, args):
                         async_saver.save_async(model_state, best_save, metadata={'epoch': epoch, 'loss': minvloss, 'type': 'best_valid'})
                         logger.info(f"NEW BEST VALIDATION LOSS! Queuing async save at epoch {epoch} (loss: {minvloss:.6f})")
 
+                # 同步屏障：确保 rank 0 完成模型状态提取后再继续
+                if world_size > 1:
+                    dist.barrier()
+                    # 广播更新后的 mintloss 和 minvloss 到所有进程
+                    loss_tensor = torch.tensor([mintloss, minvloss], device='cuda')
+                    dist.broadcast(loss_tensor, src=0)
+                    mintloss = loss_tensor[0].item()
+                    minvloss = loss_tensor[1].item()
+
                 # 学习率调度
                 if warmup_scheduler is None or epoch > warmup_scheduler.warmup_epochs:
                     old_lr = optimizer.param_groups[0]['lr']
@@ -1113,24 +1122,50 @@ def train_worker(rank, world_size, cfg, args):
                     if new_lr != old_lr and rank == 0:
                         logger.info(f"Learning rate reduced from {old_lr:.8f} to {new_lr:.8f}")
 
-                # 早停检查
+                # 早停检查 (所有进程都需要参与)
                 if early_stopping is not None:
                     actual_model = net.module if hasattr(net, 'module') else net
-                    if early_stopping(val_loss_dict['loss'], actual_model):
+                    should_stop = early_stopping(val_loss_dict['loss'], actual_model, rank=rank)
+                    if world_size > 1:
+                        # 同步所有进程的早停状态
+                        stop_tensor = torch.tensor([1.0 if should_stop else 0.0], device='cuda')
+                        dist.all_reduce(stop_tensor, op=dist.ReduceOp.MAX)
+                        should_stop = stop_tensor.item() > 0.5
+
+                    if should_stop:
                         if rank == 0:
                             logger.info(f"Early stopping triggered at epoch {epoch}")
                             logger.info(f"No improvement in validation loss for {early_stopping.patience} epochs")
                             logger.info(f"Best validation loss: {early_stopping.best_score:.6f}")
+                            # 早停时保存进度
+                            training_manager.save_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
+                        # 在 break 之前同步所有进程，确保不会有人卡在之前的 barrier
+                        if world_size > 1:
+                            dist.barrier()
                         break
 
                 # Save progress
                 if epoch % save_every == 0 and rank == 0:
                     training_manager.save_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
 
+                # 确保所有进程在进入下一个 epoch 前同步
+                if world_size > 1:
+                    dist.barrier()
+
         except KeyboardInterrupt:
             if rank == 0:
                 logger.info("Training interrupted by user")
                 training_manager.save_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
+            # 同步所有进程后再退出
+            if world_size > 1:
+                dist.barrier()
+        except Exception as e:
+            if rank == 0:
+                logger.error(f"Training error: {e}", exc_info=True)
+            # 同步所有进程后再退出
+            if world_size > 1:
+                dist.barrier()
+            raise
 
         finally:
             async_saver.stop()
