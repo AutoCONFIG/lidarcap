@@ -53,18 +53,19 @@ class AutoBatchSizeFinder:
     def __init__(self, model, loss_fn, sample_input, optimizer_class,
                  use_amp=False, target_memory_usage=0.90,
                  min_batch_size=1, max_batch_size=64,
-                 growth_factor=2.0, logger=None):
+                 growth_factor=2.0, warmup_iterations=3, logger=None):
         """
         Args:
             model: 要训练的模型
             loss_fn: 损失函数
             sample_input: 样本输入数据 (单个样本)
-            optimizer_class: 优化器类
+            optimizer_class: 优化器工厂函数
             use_amp: 是否使用混合精度
             target_memory_usage: 目标显存利用率 (0.85-0.95)
             min_batch_size: 最小 batch size
             max_batch_size: 最大 batch size
             growth_factor: 增长因子，用于快速探索
+            warmup_iterations: 预热迭代次数，用于稳定显存测量
             logger: 日志记录器
         """
         self.model = model
@@ -76,6 +77,7 @@ class AutoBatchSizeFinder:
         self.min_batch_size = min_batch_size
         self.max_batch_size = max_batch_size
         self.growth_factor = growth_factor
+        self.warmup_iterations = warmup_iterations
         self.logger = logger
 
         self.best_batch_size = min_batch_size
@@ -88,30 +90,34 @@ class AutoBatchSizeFinder:
             print(msg)
 
     def _get_memory_info(self):
-        """获取当前 GPU 显存信息"""
+        """获取当前 GPU 显存信息，使用 max_memory_allocated 更准确"""
         torch.cuda.synchronize()
         total = torch.cuda.get_device_properties(self.device).total_memory
         allocated = torch.cuda.memory_allocated(self.device)
         reserved = torch.cuda.memory_reserved(self.device)
+        # 使用 max_memory_allocated 获取峰值显存，更准确
+        max_allocated = torch.cuda.max_memory_allocated(self.device)
         return {
             'total': total,
             'allocated': allocated,
             'reserved': reserved,
+            'max_allocated': max_allocated,
             'free': total - reserved,
-            'utilization': reserved / total if total > 0 else 0
+            'utilization': max_allocated / total if total > 0 else 0
         }
 
     def _clear_cache(self):
-        """清理 GPU 缓存"""
+        """清理 GPU 缓存并重置显存统计"""
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
 
     def _create_batch_input(self, batch_size):
         """创建指定大小的 batch 输入"""
         batch_input = {}
         for key, value in self.sample_input.items():
             if isinstance(value, torch.Tensor):
-                # 扩展为 batch
+                # 扩展为 batch，使用 clone() 确保内存独立
                 batch_input[key] = value.unsqueeze(0).expand(batch_size, *value.shape).clone()
             elif isinstance(value, (list, tuple)):
                 batch_input[key] = [value[0]] * batch_size if len(value) > 0 else []
@@ -129,9 +135,6 @@ class AutoBatchSizeFinder:
         """
         self._clear_cache()
 
-        # 记录初始显存状态
-        initial_memory = self._get_memory_info()
-
         try:
             # 创建 batch 输入
             batch_input = self._create_batch_input(batch_size)
@@ -139,7 +142,30 @@ class AutoBatchSizeFinder:
             # 创建新的优化器 (避免累积梯度)
             optimizer = self.optimizer_class(self.model.parameters(), lr=1e-4)
 
-            # 前向传播
+            # 预热阶段：运行几次迭代稳定显存
+            for _ in range(self.warmup_iterations):
+                self.model.train()
+                if self.use_amp:
+                    with autocast():
+                        output = self.model(batch_input)
+                        loss, _ = self.loss_fn(**output)
+                    scaler = GradScaler()
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    output = self.model(batch_input)
+                    loss, _ = self.loss_fn(**output)
+                    loss.backward()
+                    optimizer.step()
+
+                optimizer.zero_grad(set_to_none=True)
+                del output, loss
+                torch.cuda.synchronize()
+
+            # 最终测量：再跑一次并测量峰值显存
+            torch.cuda.reset_peak_memory_stats()
+
             self.model.train()
             if self.use_amp:
                 with autocast():
@@ -183,14 +209,24 @@ class AutoBatchSizeFinder:
 
         策略:
         1. 快速增长阶段：从 min 开始，按 growth_factor 倍增，直到 OOM
-        2. 二分搜索阶段：在可行区间内精确搜索
-        3. 精调阶段：微调到接近目标显存利用率
+        2. 二分搜索阶段：在可行区间内精确搜索最大可用值
         """
         self._log("=" * 60)
         self._log("Auto Batch Size Finder - 开始自动搜索最优 batch size")
         self._log(f"目标显存利用率: {self.target_memory_usage * 100:.1f}%")
         self._log(f"搜索范围: [{self.min_batch_size}, {self.max_batch_size}]")
+        self._log(f"预热迭代次数: {self.warmup_iterations}")
         self._log("=" * 60)
+
+        # 缓存已测试的结果，避免重复测试
+        tested_results = {}
+
+        def test_and_cache(bs):
+            if bs in tested_results:
+                return tested_results[bs]
+            result = self._try_batch_size(bs)
+            tested_results[bs] = result
+            return result
 
         # 阶段1: 快速增长探索上界
         self._log("\n[阶段1] 快速探索阶段...")
@@ -199,11 +235,11 @@ class AutoBatchSizeFinder:
 
         current = low
         while current <= high:
-            success, memory_info = self._try_batch_size(current)
+            success, memory_info = test_and_cache(current)
             if success:
                 self.best_batch_size = current
                 utilization = memory_info['utilization']
-                self._log(f"  batch_size={current}: 成功, 显存利用率={utilization*100:.1f}%")
+                self._log(f"  batch_size={current}: 成功, 峰值显存={memory_info['max_allocated']/1024**3:.2f}GB, 利用率={utilization*100:.1f}%")
 
                 # 如果已经达到目标利用率，可以提前结束
                 if utilization >= self.target_memory_usage:
@@ -221,74 +257,37 @@ class AutoBatchSizeFinder:
                 break
 
         if self.best_batch_size == self.min_batch_size:
-            self._log(f"警告: 最小 batch_size={self.min_batch_size} 都可能 OOM，请检查")
+            success, _ = test_and_cache(self.min_batch_size)
+            if not success:
+                self._log(f"错误: 最小 batch_size={self.min_batch_size} 都 OOM，请检查模型或降低配置")
+                return self.min_batch_size
 
-        # 阶段2: 二分搜索精确化
+        # 阶段2: 二分搜索找最大可用值
         self._log(f"\n[阶段2] 二分搜索阶段 (范围: {low}-{high})...")
-        test_size = self.best_batch_size
 
         while low <= high:
             mid = (low + high) // 2
-            success, memory_info = self._try_batch_size(mid)
+            success, memory_info = test_and_cache(mid)
 
             if success:
-                test_size = mid
                 utilization = memory_info['utilization']
-                self._log(f"  batch_size={mid}: 成功, 显存利用率={utilization*100:.1f}%")
+                self._log(f"  batch_size={mid}: 成功, 峰值显存={memory_info['max_allocated']/1024**3:.2f}GB, 利用率={utilization*100:.1f}%")
 
-                # 如果接近目标利用率，记录并尝试更大
-                if utilization >= self.target_memory_usage:
-                    # 已经达到或超过目标，尝试减小
-                    high = mid - 1
-                else:
-                    # 还没到目标，尝试增大
-                    low = mid + 1
-                    self.best_batch_size = mid
+                # 尝试更大的值
+                low = mid + 1
+                self.best_batch_size = mid
             else:
                 self._log(f"  batch_size={mid}: OOM")
                 high = mid - 1
 
-        # 阶段3: 微调阶段 - 寻找最接近目标利用率的 batch size
-        self._log(f"\n[阶段3] 微调阶段...")
-        final_batch_size = test_size
-
-        # 尝试在 test_size 附近微调
-        for delta in [1, 2, -1, 3, -2, 4, -3]:
-            candidate = test_size + delta
-            if candidate < self.min_batch_size or candidate > self.max_batch_size:
-                continue
-
-            success, memory_info = self._try_batch_size(candidate)
-            if success:
-                utilization = memory_info['utilization']
-                self._log(f"  batch_size={candidate}: 成功, 显存利用率={utilization*100:.1f}%")
-
-                # 检查是否更接近目标
-                current_diff = abs(utilization - self.target_memory_usage)
-
-                # 重新评估当前最佳
-                _, best_memory = self._try_batch_size(final_batch_size)
-                if best_memory:
-                    best_util = best_memory['utilization']
-                    best_diff = abs(best_util - self.target_memory_usage)
-
-                    # 如果新的更接近目标，或者利用率更高且不超过目标太多
-                    if current_diff < best_diff or \
-                       (utilization > best_util and utilization <= self.target_memory_usage + 0.05):
-                        final_batch_size = candidate
-
-        # 最终验证
-        success, final_memory = self._try_batch_size(final_batch_size)
-        if success:
-            self.best_batch_size = final_batch_size
-
         # 最终报告
+        success, final_memory = test_and_cache(self.best_batch_size)
         self._log("\n" + "=" * 60)
         self._log(f"自动 Batch Size 搜索完成!")
         self._log(f"最优 batch size: {self.best_batch_size}")
         if final_memory:
+            self._log(f"峰值显存: {final_memory['max_allocated']/1024**3:.2f} GB / {final_memory['total']/1024**3:.2f} GB")
             self._log(f"显存利用率: {final_memory['utilization']*100:.1f}%")
-            self._log(f"显存使用: {final_memory['reserved']/1024**3:.2f} GB / {final_memory['total']/1024**3:.2f} GB")
         self._log("=" * 60)
 
         return self.best_batch_size
@@ -869,6 +868,7 @@ def train_worker(rank, world_size, cfg, args):
             target_memory_usage=cfg.TRAIN.get('auto_batch_size_target', 0.90),
             min_batch_size=cfg.TRAIN.get('auto_batch_size_min', 1),
             max_batch_size=cfg.TRAIN.get('auto_batch_size_max', 64),
+            warmup_iterations=cfg.TRAIN.get('auto_batch_size_warmup', 3),
             logger=logger if rank == 0 else None
         )
 
