@@ -853,16 +853,18 @@ def train_worker(rank, world_size, cfg, args):
         temp_model = TempRegressor(cfg=cfg).cuda()
         temp_loss_fn = TempLoss(cfg=cfg).cuda()
 
-        # 创建优化器类
-        optimizer_class = lambda params: torch.optim.Adam(
-            params, lr=cfg.TRAIN.learning_rate, weight_decay=cfg.TRAIN.weight_decay
-        )
+        # 创建优化器工厂函数
+        def optimizer_factory(params, **kwargs):
+            return torch.optim.Adam(
+                params, lr=kwargs.get('lr', cfg.TRAIN.learning_rate),
+                weight_decay=cfg.TRAIN.weight_decay
+            )
 
         finder = AutoBatchSizeFinder(
             model=temp_model,
             loss_fn=temp_loss_fn,
             sample_input=sample_input_gpu,
-            optimizer_class=optimizer_class,
+            optimizer_class=optimizer_factory,
             use_amp=cfg.TRAIN.use_amp,
             target_memory_usage=cfg.TRAIN.get('auto_batch_size_target', 0.90),
             min_batch_size=cfg.TRAIN.get('auto_batch_size_min', 1),

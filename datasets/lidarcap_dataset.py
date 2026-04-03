@@ -19,13 +19,6 @@ trans = transforms.Compose([
 ])
 
 
-def pc_normalize(pc):
-    pc[..., 0:2] -= np.mean(pc[..., 0:2], axis=1, keepdims=True)
-    pc[..., 2] -= np.mean(pc[..., 2])
-    pc /= 1.2
-    return pc
-
-
 def pc_normalize_w_raw_z(pc):
     pc[..., 0:2] -= np.mean(pc[..., 0:2], axis=1, keepdims=True)
     # pc[..., 2] -= np.mean(pc[..., 2])
@@ -484,27 +477,6 @@ class TemporalDataset(Dataset):
 
     def __len__(self):
         return self.length
-
-
-def fix_dataset_seqlen(dataset_id):
-    import h5py
-    output_dataset_name = os.path.join('your_data_path',
-                                       f'{dataset_id}_fix_dataset_seqlen.hdf5')
-    dataset_name = os.path.join('your_data_path',
-                                f'{dataset_id}.hdf5')
-
-    print(f'reading data：{dataset_name}')
-    dataset = h5py.File(dataset_name, 'r')
-
-    with h5py.File(output_dataset_name, 'w') as f:
-        for k, v in dataset.items():
-            print('ori dataset', k, v.shape)
-            if len(v.shape) >= 2 and v.shape[1] == 16:
-                new_v = v[:].reshape(v.shape[0] * v.shape[1], *v.shape[2:])
-                print('new dataset', k, new_v.shape)
-                f.create_dataset(k, data=new_v)
-    print(f'success change the seqlen of data：{dataset_id}to 0！')
-    print(f'new date saved in：{output_dataset_name}')
 
 
 def collate(batch, _use_shared_memory=True):
@@ -997,24 +969,3 @@ class CachedLidarCapDataset(Dataset):
 
     def __len__(self):
         return self.length
-
-
-def create_cache_dataset(dataset_path, output_path=None, compress=True, chunk_size=1000):
-    """
-    此函数已弃用，请使用 tools/create_dataset_cache.py 脚本
-
-    原功能已迁移到工具脚本中:
-    python tools/create_dataset_cache.py --data-dir /path/to/data --output-dir ./cache
-
-    Args:
-        dataset_path: 数据目录（需包含train.txt和test.txt）
-        output_path: 输出目录
-        compress: 是否使用压缩
-        chunk_size: 分块大小
-    """
-    print("[DEPRECATED] create_cache_dataset函数已弃用")
-    print("[INFO] 请使用新工具脚本: python tools/create_dataset_cache.py --data-dir <path> --output-dir <dir>")
-    print(f"[INFO] 数据目录: {dataset_path}")
-    if output_path:
-        print(f"[INFO] 输出目录: {output_path}")
-    return None
