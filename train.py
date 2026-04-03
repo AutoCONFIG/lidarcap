@@ -294,49 +294,6 @@ class AutoBatchSizeFinder:
         return self.best_batch_size
 
 
-def find_optimal_batch_size(cfg, rank, logger, sample_input):
-    """
-    便捷函数：自动寻找最优 batch size
-
-    Args:
-        cfg: 配置对象
-        rank: 当前进程 rank
-        logger: 日志记录器
-        sample_input: 样本输入数据
-
-    Returns:
-        optimal_batch_size: 最优 batch size
-    """
-    if not cfg.TRAIN.get('auto_batch_size', False):
-        return cfg.TRAIN.batch_size
-
-    # 创建临时模型和损失函数
-    from modules.regressor import Regressor
-    from modules.loss import Loss
-
-    model = Regressor(cfg=cfg).cuda()
-    loss_fn = Loss(cfg=cfg).cuda()
-
-    # 创建优化器类
-    optimizer_class = lambda params: torch.optim.Adam(
-        params, lr=cfg.TRAIN.learning_rate, weight_decay=cfg.TRAIN.weight_decay
-    )
-
-    finder = AutoBatchSizeFinder(
-        model=model,
-        loss_fn=loss_fn,
-        sample_input=sample_input,
-        optimizer_class=optimizer_class,
-        use_amp=cfg.TRAIN.use_amp,
-        target_memory_usage=cfg.TRAIN.get('auto_batch_size_target', 0.90),
-        min_batch_size=cfg.TRAIN.get('auto_batch_size_min', 1),
-        max_batch_size=cfg.TRAIN.get('auto_batch_size_max', 64),
-        logger=logger if rank == 0 else None
-    )
-
-    return finder.find_optimal_batch_size()
-
-
 def setup_distributed(rank, world_size):
     """初始化分布式训练环境"""
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -889,13 +846,36 @@ def train_worker(rank, world_size, cfg, args):
             else:
                 sample_input_gpu[key] = value
 
-        # 在分布式环境中，只在 rank 0 上进行搜索，然后广播结果
+        # 创建临时模型用于测试 batch size
+        from modules.regressor import Regressor as TempRegressor
+        from modules.loss import Loss as TempLoss
+
+        temp_model = TempRegressor(cfg=cfg).cuda()
+        temp_loss_fn = TempLoss(cfg=cfg).cuda()
+
+        # 创建优化器类
+        optimizer_class = lambda params: torch.optim.Adam(
+            params, lr=cfg.TRAIN.learning_rate, weight_decay=cfg.TRAIN.weight_decay
+        )
+
+        finder = AutoBatchSizeFinder(
+            model=temp_model,
+            loss_fn=temp_loss_fn,
+            sample_input=sample_input_gpu,
+            optimizer_class=optimizer_class,
+            use_amp=cfg.TRAIN.use_amp,
+            target_memory_usage=cfg.TRAIN.get('auto_batch_size_target', 0.90),
+            min_batch_size=cfg.TRAIN.get('auto_batch_size_min', 1),
+            max_batch_size=cfg.TRAIN.get('auto_batch_size_max', 64),
+            logger=logger if rank == 0 else None
+        )
+
+        # 在分布式环境中，只在 rank 0 上进行搜索
         if world_size > 1:
             dist.barrier()
 
         if rank == 0:
-            # 找到最优 batch size
-            optimal_batch_size = find_optimal_batch_size(cfg, rank, logger, sample_input_gpu)
+            optimal_batch_size = finder.find_optimal_batch_size()
         else:
             optimal_batch_size = None
 
@@ -903,9 +883,9 @@ def train_worker(rank, world_size, cfg, args):
         if world_size > 1:
             optimal_batch_size_tensor = torch.tensor([optimal_batch_size if rank == 0 else 0], device='cuda')
             dist.broadcast(optimal_batch_size_tensor, src=0)
-            optimal_batch_size = optimal_batch_size_tensor.item()
+            optimal_batch_size = int(optimal_batch_size_tensor.item())
 
-        batch_size = optimal_batch_size
+        batch_size = int(optimal_batch_size) if optimal_batch_size else cfg.TRAIN.batch_size
         if rank == 0:
             logger.info(f"自动调整后的 batch size: {batch_size}")
 
@@ -913,8 +893,8 @@ def train_worker(rank, world_size, cfg, args):
         if world_size > 1:
             dist.barrier()
 
-        # 清理样本数据
-        del sample_input_gpu
+        # 清理临时模型和样本数据
+        del temp_model, temp_loss_fn, sample_input_gpu, finder
         torch.cuda.empty_cache()
 
     # 使用 DistributedSampler

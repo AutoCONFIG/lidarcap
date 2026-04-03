@@ -28,6 +28,13 @@ class ConfigNode(dict):
         except KeyError:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
 
+    def get(self, key, default=None):
+        """支持 dict.get() 方法"""
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
 
 def dict_to_config(d):
     """递归将字典转换为 ConfigNode"""
