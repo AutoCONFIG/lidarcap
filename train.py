@@ -887,9 +887,13 @@ def train_worker(rank, world_size, cfg, args):
             dist.broadcast(optimal_batch_size_tensor, src=0)
             optimal_batch_size = int(optimal_batch_size_tensor.item())
 
-        batch_size = int(optimal_batch_size) if optimal_batch_size else cfg.TRAIN.batch_size
+        # 应用安全系数，避免边缘情况 OOM
+        safety_margin = cfg.TRAIN.get('auto_batch_size_safety_margin', 0.85)
+        batch_size = max(1, int(optimal_batch_size * safety_margin)) if optimal_batch_size else cfg.TRAIN.batch_size
+
         if rank == 0:
-            logger.info(f"自动调整后的 batch size: {batch_size}")
+            logger.info(f"搜索得到的 batch size: {optimal_batch_size}")
+            logger.info(f"应用安全系数 {safety_margin} 后的 batch size: {batch_size}")
 
         # 同步所有进程
         if world_size > 1:

@@ -9,10 +9,11 @@ TRAIN:
   batch_size: 2             # 训练批次大小，多卡时每卡分摊
   eval_batch_size: 2        # 验证批次大小
   auto_batch_size: true      # 自动调整 batch size 以充分利用显存
-  auto_batch_size_target: 0.95  # 目标显存利用率 (0.85-0.95)
+  auto_batch_size_target: 0.95  # 目标显存利用率 (建议 0.80-0.90，留出安全余量)
   auto_batch_size_min: 1     # 最小 batch size
   auto_batch_size_max: 64    # 最大 batch size
   auto_batch_size_warmup: 3  # 预热迭代次数，用于稳定显存测量
+  auto_batch_size_safety_margin: 0.8  # 安全系数，最终 batch_size 会乘以这个系数
   num_epochs: 600            # 最大训练轮数
   num_workers: 2             # 数据加载线程数（预加载后可减少）
 
