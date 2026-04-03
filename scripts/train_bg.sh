@@ -45,6 +45,6 @@ echo ""
 
 # 创建分离的会话，发送命令，然后 attach
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT"
-tmux send-keys -t "$SESSION_NAME" conda activate lidarcap && cd $PROJECT_ROOT && python train.py --config-dir $CONFIG_DIR" Enter
+tmux send-keys -t "$SESSION_NAME" "conda activate lidarcap && cd $PROJECT_ROOT && python train.py --config-dir $CONFIG_DIR" Enter
 sleep 1
 tmux attach-session -t "$SESSION_NAME"
