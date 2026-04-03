@@ -1051,6 +1051,10 @@ def train_worker(rank, world_size, cfg, args):
 
         try:
             for epoch in range(start_epoch, num_epochs + 1):
+                # 每个 epoch 开始时先同步所有进程
+                if world_size > 1:
+                    dist.barrier()
+
                 epoch_start_time = time.time()
                 if rank == 0:
                     logger.info(f"Starting epoch {epoch}/{num_epochs}")
@@ -1150,9 +1154,7 @@ def train_worker(rank, world_size, cfg, args):
                 if epoch % save_every == 0 and rank == 0:
                     training_manager.save_progress(epoch, net, optimizer, scheduler, mintloss, minvloss)
 
-                # 确保所有进程在进入下一个 epoch 前同步
-                if world_size > 1:
-                    dist.barrier()
+                # epoch 结束时不需要单独 barrier，下一个 epoch 开始时会 barrier
 
         except KeyboardInterrupt:
             if rank == 0:
