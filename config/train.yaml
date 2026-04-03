@@ -15,7 +15,7 @@ TRAIN:
   auto_batch_size_warmup: 3  # 预热迭代次数，用于稳定显存测量
   auto_batch_size_safety_margin: 0.8  # 安全系数，最终 batch_size 会乘以这个系数
   num_epochs: 600            # 最大训练轮数
-  num_workers: 2             # 数据加载线程数（预加载后可减少）
+  num_workers: 0             # 数据加载线程数（DDP 环境下建议设为 0，避免多进程问题）
 
   # 学习率相关
   learning_rate: 0.0001      # 初始学习率，Adam优化器常用1e-4
