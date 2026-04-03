@@ -10,3 +10,4 @@ build/
 .kilo/
 .ipynb_checkpoints/
 output/
+.claude/

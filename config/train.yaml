@@ -6,8 +6,12 @@
 # 训练基础参数
 # -----------------------------------------------------------------------------
 TRAIN:
-  batch_size: 12             # 训练批次大小，多卡时每卡分摊
-  eval_batch_size: 12        # 验证批次大小
+  batch_size: 2             # 训练批次大小，多卡时每卡分摊
+  eval_batch_size: 2        # 验证批次大小
+  auto_batch_size: true      # 自动调整 batch size 以充分利用显存
+  auto_batch_size_target: 0.95  # 目标显存利用率 (0.85-0.95)
+  auto_batch_size_min: 1     # 最小 batch size
+  auto_batch_size_max: 64    # 最大 batch size
   num_epochs: 600            # 最大训练轮数
   num_workers: 2             # 数据加载线程数（预加载后可减少）
 
