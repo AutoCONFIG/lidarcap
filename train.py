@@ -595,9 +595,9 @@ class MyTrainer(crafter.Trainer):
         self.world_size = world_size
 
         if self.use_amp and rank == 0:
-            logging.info("混合精度训练已启用")
+            logger.info("混合精度训练已启用")
         if self.grad_clip and rank == 0:
-            logging.info(f"梯度裁剪已启用，max_norm={self.grad_clip}")
+            logger.info(f"梯度裁剪已启用，max_norm={self.grad_clip}")
 
     def forward_backward(self, inputs):
         if self.use_amp:
@@ -907,7 +907,8 @@ def train_worker(rank, world_size, cfg, args):
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=batch_size, sampler=train_sampler,
-        num_workers=num_workers, pin_memory=True, collate_fn=collate)
+        num_workers=num_workers, pin_memory=True, collate_fn=collate,
+        persistent_workers=num_workers > 0)  # 保持 worker 进程存活，避免每个 epoch 重启
 
     if preload:
         valid_dataset = CachedLidarCapDataset(cfg=cfg.TestDataset, dataset=dataset_name, train=False, preload=True)
@@ -917,7 +918,8 @@ def train_worker(rank, world_size, cfg, args):
     valid_sampler = DistributedSampler(valid_dataset, num_replicas=world_size, rank=rank, shuffle=False)
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=eval_batch_size, sampler=valid_sampler,
-        num_workers=num_workers, pin_memory=True, collate_fn=collate)
+        num_workers=num_workers, pin_memory=True, collate_fn=collate,
+        persistent_workers=num_workers > 0)
 
     loader = {'Train': train_loader, 'Valid': valid_loader}
 
